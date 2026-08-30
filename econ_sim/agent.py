@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from email.mime import base
 import random
 from typing import TYPE_CHECKING
 
-from econ_sim.config import RECIPES, SimConfig
-from econ_sim.types import AgentState, CounterpartyMemory, Good, Order, Recipe
+from econ_sim.config import GOAL_CHAIN_RECIPES, RECIPES, SimConfig, forage_yield_per_agent, RECIPE_BY_NAME
+from econ_sim.types import AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain
 
 if TYPE_CHECKING:
     from econ_sim.events import EventLog
-
 
 class Agent:
     def __init__(
@@ -16,7 +16,7 @@ class Agent:
         agent_id: int,
         config: SimConfig,
         rng: random.Random,
-        skill_affinities: dict[str, float] | None = None,
+        skill_affinities: dict[SkillDomain, float] | None = None,
     ) -> None:
         self.state = AgentState(agent_id=agent_id, money=config.initial_money)
         self.config = config
@@ -27,11 +27,17 @@ class Agent:
         self.state.money += rng.uniform(-config.money_jitter, config.money_jitter)
         self.state.money = max(1.0, self.state.money)
 
+        self.state.current_goal = None
+        self.state.alive = True
+        self.state.self_reliance = rng.uniform(config.self_reliance_min, config.self_reliance_max)
+
         self.state.inventory[Good.FOOD] = max(
             0,
             config.initial_food
             + rng.randint(-config.endowment_jitter, config.endowment_jitter),
         )
+        if self.state.inventory[Good.FOOD] > 0:
+            self.state.food_lots.append((self.state.inventory[Good.FOOD], 0))
         self.state.inventory[Good.WOOD] = max(
             0,
             config.initial_wood
@@ -42,10 +48,6 @@ class Agent:
             config.initial_tools
             + rng.randint(0, config.endowment_jitter // 2),
         )
-
-        for recipe in RECIPES:
-            affinity = rng.uniform(config.skill_affinity_min, config.skill_affinity_max)
-            self.state.skills[recipe.name] = affinity
 
     @property
     def agent_id(self) -> int:
@@ -67,10 +69,83 @@ class Agent:
             Good.TOOLS: self.config.tool_urgency_weight,
         }
         return weights[good]
+    
+    def _recipes_toward_good(self, goal: Good) -> list[Recipe]:
+        return GOAL_CHAIN_RECIPES[goal]
+    
+    def _productivity(self, recipe_name: str) -> float:
+        recipe = RECIPE_BY_NAME[recipe_name]
+        skill = self.state.skills.get(recipe.domain, 1.0)
+        affinity = self.skill_affinities.get(recipe.domain, 1.0)
+        cap = self.config.skill_productivity_cap
+        base = self.config.skill_productivity_base
 
+        raw = base * skill * affinity
+        if skill < recipe.min_skill:
+            proficiency = skill / recipe.min_skill
+            raw *= proficiency ** self.config.novice_penalty_exponent
+        return min(cap, raw)
+
+    def _self_production_cost(self, recipe: Recipe, good: Good) -> float:
+        productivity = self._productivity(recipe.name)
+        if productivity <= 0:
+            return float("inf")
+        base_prices = self.config.base_prices()
+        input_cost = sum(qty * base_prices.get(g, 1.0) for g, qty in recipe.inputs.items())
+        expected_output = recipe.outputs.get(good, 0) * productivity
+        if expected_output <= 0:
+            return float("inf")  # will likely produce nothing — not a real option
+
+        # cost per unit actually produced, accounting for waste from low skill
+        return input_cost / expected_output
+
+    # Compare to market price with self-reliance
+    def _should_make_good(self, recipe: Recipe, good: Good, market_prices: dict[Good, float] | None = None) -> bool:
+        market_price = (market_prices or {}).get(good, self.config.base_prices()[good])
+        make_cost = self._self_production_cost(recipe, good)
+        skill = self.state.skills.get(recipe.domain, 1.0)
+        if make_cost <= market_price * self.state.self_reliance or skill < recipe.min_skill:
+            return True
+        return False
+
+    def _choose_goal(self) -> Good | None:
+        """Choose the most urgent good the agent wants to produce. Shortages only"""
+        shortages = [
+            (good, self._shortage(good) * self._urgency_weight(good))
+            for good in Good
+            if self._shortage(good) > 0
+        ]
+
+        if shortages:
+            candidates = shortages
+        else:
+            risks = [
+                (good, self._depletion_risk(good) * self._urgency_weight(good) * 0.5)
+                for good in Good
+                if self._depletion_risk(good) > 0
+            ]
+            risks = []
+            if not risks:
+                self.state.current_goal = None
+                return None
+            candidates = risks
+
+        best_good, best_score = max(candidates, key=lambda x: x[1])
+
+        # Stay on the current goal unless something else has become
+        # meaningfully more urgent. Avoids oscillation between two
+        # shortages that are close in magnitude.
+        if self.state.current_goal is not None:
+            current_score = dict(candidates).get(self.state.current_goal)
+            if current_score is not None and current_score >= best_score * self.config.goal_stickiness:
+                return self.state.current_goal
+
+        self.state.current_goal = best_good
+        return best_good
+    
     def _score_recipe(self, recipe: Recipe) -> float:
         """Heuristic score: how much this recipe closes inventory gaps."""
-        score = 0.0
+        score = 0.0 
         base_prices = self.config.base_prices()
 
         for good, qty in recipe.outputs.items():
@@ -84,6 +159,7 @@ class Agent:
         for good, qty in recipe.inputs.items():
             surplus = self._surplus(good)
             if surplus >= qty:
+                # incentivize using surplus inputs to produce something else
                 score += 0.5
             elif self.state.inventory_of(good) >= qty:
                 score -= 0.3 * self._urgency_weight(good)
@@ -91,29 +167,58 @@ class Agent:
         skill = self._productivity(recipe.name)
         score *= skill
 
-        if recipe.name == self.state.last_recipe:
-            score *= 1.1
-
-        if recipe.name == "hunt_farm" and self.state.inventory_of(Good.TOOLS) >= 1:
-            score *= 1.8
-        if recipe.name == "forage":
-            score *= 0.7
-
         return score
+    
+    def _depletion_risk(self, good: Good) -> float:
+        buffer = self.state.inventory_of(good) - self.config.targets()[good]
+        if buffer > self.config.surplus_buffer:
+            return 0.0
 
-    def _productivity(self, recipe_name: str) -> float:
-        skill = self.state.skills.get(recipe_name, 1.0)
-        affinity = self.skill_affinities.get(recipe_name, 1.0)
-        cap = self.config.skill_productivity_cap
-        base = self.config.skill_productivity_base
-        return min(cap, base * skill * affinity)
+        if good == Good.FOOD:
+            drain = self.config.food_consumption_per_tick
+        else:
+            consumers = [r for r in RECIPES if good in r.inputs]
+            if not consumers:
+                return 0.0
+            drain = max(r.inputs[good] for r in consumers)
 
-    def choose_production(self) -> Recipe | None:
+        return max(0.0, drain - buffer)
+
+    def _chain_score(self, recipe: Recipe, goal: Good, depth: int) -> float:
+        """Score a recipe that is a prerequisite toward `goal` but doesn't
+        produce it directly (e.g. chop_wood when the goal is food via tools).
+        Discounted by how many hops away it is from the goal."""
+        base = self._score_recipe(recipe)
+        discount = self.config.chain_discount ** depth
+        return base * discount * self._urgency_weight(goal)
+
+    def choose_production(self, market_prices: dict[Good, float]) -> Recipe | None:
         feasible = [r for r in RECIPES if r.can_afford(self.state.inventory)]
         if not feasible:
             return None
 
-        scored = [(self._score_recipe(r), r) for r in feasible]
+        goal = self._choose_goal()
+
+        if goal is not None:
+            chain = self._recipes_toward_good(goal)
+            chain_candidates = [r for r in feasible if r in chain] or feasible
+
+            # looks at whether each good is worth producing
+            should_produce = [r for r in chain_candidates 
+                          if self._should_make_good(r, next(iter(r.outputs)), market_prices)]
+            candidates = should_produce or chain_candidates
+            scored = []
+            for r in candidates:
+                if r.outputs.get(goal, 0) > 0:
+                    scored.append((self._score_recipe(r), r))
+                else:
+                    # figure out how many hops this recipe is from the goal
+                    depth = self._chain_depth_of(r, goal, self.config.chain_depth)
+                    scored.append((self._chain_score(r, goal, depth), r))
+        else:
+            # No urgent shortages: pick whatever is most efficient in general.
+            scored = [(self._score_recipe(r), r) for r in feasible]
+
         scored.sort(key=lambda x: x[0], reverse=True)
 
         top_n = min(self.config.production_top_n, len(scored))
@@ -122,15 +227,50 @@ class Agent:
         _, chosen = self.rng.choices(top, weights=weights, k=1)[0]
         return chosen
 
-    def execute_production(self, recipe: Recipe) -> dict[str, int]:
+    def _chain_depth_of(self, recipe: Recipe, goal: Good, max_depth: int) -> int:
+        """How many hops `recipe` sits from directly producing `goal`."""
+        frontier = {goal}
+        visited: set[Good] = set()
+        for depth in range(max_depth):
+            next_frontier: set[Good] = set()
+            for good in frontier:
+                if good in visited:
+                    continue
+                visited.add(good)
+                for r in RECIPES:
+                    if r.outputs.get(good, 0) > 0:
+                        if r.name == recipe.name:
+                            return depth
+                        next_frontier.update(r.inputs.keys())
+            frontier = next_frontier
+        return max_depth
+
+    def execute_production(
+        self,
+        recipe: Recipe,
+        tick: int,
+        num_forgers: int = 1,
+    ) -> dict[str, int]:
         for good, qty in recipe.inputs.items():
-            self.state.remove_good(good, qty)
+            if good == Good.FOOD:
+                self.remove_food(qty)
+            else:
+                self.state.remove_good(good, qty)
 
         productivity = self._productivity(recipe.name)
         outputs: dict[str, int] = {}
         for good, base_qty in recipe.outputs.items():
-            qty = max(1, int(base_qty * productivity)) if base_qty > 0 else 0
-            self.state.add_good(good, qty)
+            if recipe.name == "forage" and good == Good.FOOD:
+                qty = forage_yield_per_agent(
+                    self.config, num_forgers, productivity, base_qty
+                )
+            else:
+                qty = max(1, int(base_qty * productivity)) if base_qty > 0 else 0
+
+            if good == Good.FOOD:
+                self.add_food(qty, tick)
+            else:
+                self.state.add_good(good, qty)
             outputs[good.value] = qty
 
         self.state.last_recipe = recipe.name
@@ -141,36 +281,39 @@ class Agent:
         return outputs
 
     def _apply_learning(self, recipe_name: str) -> None:
-        current = self.state.skills.get(recipe_name, 1.0)
+        recipe = RECIPE_BY_NAME[recipe_name]
+        current = self.state.skills.get(recipe.domain, 1.0)
         gain = self.config.skill_gain_per_use
         cap = self.config.skill_productivity_cap
-        self.state.skills[recipe_name] = min(cap, current + gain)
+        self.state.skills[recipe.domain] = min(cap, current + gain)
 
     def reservation_bid_price(
         self, good: Good, market_prices: dict[Good, float] | None = None
     ) -> float:
-        base = (market_prices or self.config.base_prices()).get(
-            good, self.config.base_prices()[good]
-        )
+        base = self.config.base_prices()[good]
+        market_ref = (market_prices or {}).get(good, base)
+        anchor = 0.7 * base + 0.3 * market_ref # allow some market influence
+
         shortage = self._shortage(good)
         target = self.config.targets()[good]
         if target == 0:
             return base
         urgency = min(1.0, shortage / target)
-        return base * (1.0 + self.config.shortage_premium * urgency)
+        return anchor * (1.0 + self.config.shortage_premium * urgency)
 
     def reservation_ask_price(
         self, good: Good, market_prices: dict[Good, float] | None = None
     ) -> float:
-        base = (market_prices or self.config.base_prices()).get(
-            good, self.config.base_prices()[good]
-        )
+        base = self.config.base_prices()[good]
+        market_ref = (market_prices or {}).get(good, base)
+        anchor = 0.7 * base + 0.3 * market_ref # allow some market influence
+
         surplus = self._surplus(good)
         target = self.config.targets()[good]
         if target == 0:
             return base
         excess = min(1.0, surplus / max(1, target))
-        return max(0.5, base * (1.0 - self.config.surplus_discount * excess))
+        return max(0.5, anchor * (1.0 - self.config.surplus_discount * excess))
 
     def generate_orders(
         self,
@@ -256,22 +399,74 @@ class Agent:
             return self.state.last_recipe
         return max(self.state.recipe_counts, key=self.state.recipe_counts.get)  # type: ignore[arg-type]
 
+    def add_food(self, qty: int, tick: int) -> None:
+        if qty <= 0:
+            return
+        self.state.food_lots.append((qty, tick))
+        self._sync_food_inventory()
+
+    def remove_food(self, qty: int) -> None:
+        if qty <= 0:
+            return
+        remaining = qty
+        kept: list[tuple[int, int]] = []
+        for lot_qty, lot_tick in self.state.food_lots:
+            if remaining <= 0:
+                kept.append((lot_qty, lot_tick))
+                continue
+            take = min(lot_qty, remaining)
+            lot_qty -= take
+            remaining -= take
+            if lot_qty > 0:
+                kept.append((lot_qty, lot_tick))
+        if remaining > 0:
+            raise ValueError(
+                f"Agent {self.agent_id} insufficient food: need {qty} more"
+            )
+        self.state.food_lots = kept
+        self._sync_food_inventory()
+
+    def decay_food(self, current_tick: int) -> int:
+        """Remove food older than shelf life. Returns spoiled quantity."""
+        if self.config.food_shelf_life_enabled is False:
+            return 0
+        shelf = self.config.food_shelf_life_ticks
+        spoiled = 0
+        fresh: list[tuple[int, int]] = []
+        for lot_qty, lot_tick in self.state.food_lots:
+            if current_tick - lot_tick >= shelf:
+                spoiled += lot_qty
+            else:
+                fresh.append((lot_qty, lot_tick))
+        self.state.food_lots = fresh
+        self._sync_food_inventory()
+        return spoiled
+
+    def _sync_food_inventory(self) -> None:
+        self.state.inventory[Good.FOOD] = sum(q for q, _ in self.state.food_lots)
+
     def consume_food(self) -> int:
-        """Eat food for survival. Returns amount consumed."""
+        """Eat food for survival (oldest lots first). Returns amount consumed."""
         needed = self.config.food_consumption_per_tick
         available = self.state.inventory_of(Good.FOOD)
-        consumed = min(needed, available)
-        if consumed > 0:
-            self.state.remove_good(Good.FOOD, consumed)
-        return consumed
+        
+        if needed > available:
+            self.state.alive = False
+            return 0
+        else:
+            self.remove_food(needed)
+        return needed
 
     def snapshot(self) -> dict:
         return {
             "agent_id": self.agent_id,
             "money": round(self.state.money, 2),
             "inventory": {g.value: self.state.inventory_of(g) for g in Good},
-            "skills": {k: round(v, 3) for k, v in self.state.skills.items()},
+            # ensures enum stuff gets outputted correctly
+            "skills": {getattr(domain, "value", domain): round(skill, 3) for domain, skill in self.state.skills.items()},
             "last_recipe": self.state.last_recipe,
+            "primary_activity": self.primary_activity(),
+            "self_reliance": round(self.state.self_reliance, 3),
             "memory_size": len(self.state.memory),
         }
 
@@ -280,8 +475,9 @@ def create_agents(config: SimConfig, rng: random.Random) -> list[Agent]:
     agents: list[Agent] = []
     for i in range(config.num_agents):
         affinities = {
-            r.name: rng.uniform(config.skill_affinity_min, config.skill_affinity_max)
-            for r in RECIPES
+            # may use bell curve in future, more realistic
+            domain: rng.uniform(config.skill_affinity_min, config.skill_affinity_max)
+            for domain in SkillDomain
         }
         agents.append(Agent(i, config, rng, affinities))
-    return agents
+    return agents 

@@ -10,7 +10,7 @@ from econ_sim.config import SimConfig
 from econ_sim.events import EventLog, EventType
 from econ_sim.market import Market
 from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
-from econ_sim.types import Good, TradeRecord
+from econ_sim.types import Good, Recipe, TradeRecord
 
 
 @dataclass
@@ -28,6 +28,7 @@ class Simulation:
     def __post_init__(self) -> None:
         self.rng = random.Random(self.config.seed)
         self.agents = create_agents(self.config, self.rng)
+        self.dead_agents = []
         self._last_prices = dict(self.config.base_prices())
         self._initial_total_money = sum(a.state.money for a in self.agents)
 
@@ -38,6 +39,7 @@ class Simulation:
         self.snapshots.clear()
         self.rng = random.Random(self.config.seed)
         self.agents = create_agents(self.config, self.rng)
+        self.dead_agents.clear()
         self._last_prices = dict(self.config.base_prices())
         self._initial_total_money = sum(a.state.money for a in self.agents)
 
@@ -55,7 +57,6 @@ class Simulation:
         bids, asks = self._phase_offers()
         trades = self._phase_matching(bids, asks)
         self._phase_housekeeping(trades)
-
         snapshot = compute_tick_snapshot(
             self.tick,
             self.agents,
@@ -65,7 +66,7 @@ class Simulation:
             self._last_prices,
         )
         self.snapshots.append(snapshot)
-
+        
         self.event_log.record(
             self.tick,
             EventType.TICK,
@@ -74,6 +75,7 @@ class Simulation:
                 "total_trades": snapshot.total_trades,
                 "prices": snapshot.prices,
                 "specialization": snapshot.specialization,
+                "food_per_capita": snapshot.food_per_capita,
             },
         )
 
@@ -82,20 +84,32 @@ class Simulation:
 
     def _phase_production(self) -> dict[str, int]:
         totals: dict[str, int] = defaultdict(int)
+        choices: list[tuple[Agent, Recipe]] = []
 
         for agent in self.agents:
-            recipe = agent.choose_production()
-            if recipe is None:
-                continue
-            outputs = agent.execute_production(recipe)
+            recipe = agent.choose_production(self._last_prices)
+            if recipe is not None:
+                choices.append((agent, recipe))
+
+        num_forgers = sum(1 for _, recipe in choices if recipe.name == "forage")
+
+        for agent, recipe in choices:
+            outputs = agent.execute_production(
+                recipe, tick=self.tick, num_forgers=num_forgers
+            )
             for good, qty in outputs.items():
                 totals[good] += qty
+            log_data: dict[str, object] = {
+                "recipe": recipe.name,
+                "outputs": outputs,
+            }
+            if recipe.name == "forage":
+                log_data["num_forgers"] = num_forgers
             self.event_log.record(
                 self.tick,
                 EventType.PRODUCTION,
                 agent_id=agent.agent_id,
-                recipe=recipe.name,
-                outputs=outputs,
+                **log_data,
             )
 
         return dict(totals)
@@ -156,8 +170,12 @@ class Simulation:
 
             buyer.state.money -= cost
             seller.state.money += cost
-            buyer.state.add_good(trade.good, trade.quantity)
-            seller.state.remove_good(trade.good, trade.quantity)
+            if trade.good == Good.FOOD:
+                buyer.add_food(trade.quantity, self.tick)
+                seller.remove_food(trade.quantity)
+            else:
+                buyer.state.add_good(trade.good, trade.quantity)
+                seller.state.remove_good(trade.good, trade.quantity)
 
             buyer.record_trade(trade.seller_id, self.tick)
             seller.record_trade(trade.buyer_id, self.tick)
@@ -192,6 +210,15 @@ class Simulation:
 
     def _phase_housekeeping(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:
+            spoiled = agent.decay_food(self.tick)
+            if spoiled > 0:
+                self.event_log.record(
+                    self.tick,
+                    EventType.FOOD_DECAY,
+                    agent_id=agent.agent_id,
+                    quantity=spoiled,
+                    shelf_life=self.config.food_shelf_life_ticks,
+                )
             consumed = agent.consume_food()
             if consumed > 0:
                 self.event_log.record(
@@ -201,6 +228,15 @@ class Simulation:
                     action="consume_food",
                     quantity=consumed,
                 )
+            else:
+                self.event_log.record(
+                    self.tick,
+                    EventType.TICK,
+                    agent_id=agent.agent_id,
+                    action="starvation",
+                )
+                self.agents.remove(agent)
+                self.dead_agents.append(agent)
             agent.decay_memory(self.tick)
 
     def _check_invariants(self, trades: list[TradeRecord]) -> None:

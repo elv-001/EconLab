@@ -1,4 +1,5 @@
 from __future__ import annotations
+import statistics
 
 from collections import Counter
 from dataclasses import dataclass, field
@@ -16,9 +17,12 @@ class TickSnapshot:
     trade_volume: dict[str, int] = field(default_factory=dict)
     total_trades: int = 0
     gini: float = 0.0
+    last_action: dict[str, int] = field(default_factory=dict)
     specialization: dict[str, int] = field(default_factory=dict)
     avg_money: float = 0.0
     total_money: float = 0.0
+    food_per_capita: float = 0.0
+    agents_alive: int = 0
 
 
 def gini_coefficient(values: list[float]) -> float:
@@ -39,13 +43,23 @@ def compute_specialization(agents: list[Agent]) -> dict[str, int]:
     """Count agents by their most-used recipe over the run."""
     counts: Counter[str] = Counter()
     for agent in agents:
-        activity = agent.primary_activity()
+        activity = agent.state.last_recipe
         if activity:
-            counts[activity] += 1
+           counts[activity] += 1
+        else:
+           counts["idle"] += 1
+    return dict(counts)
+
+def compute_last_action(agents: list[Agent]) -> dict[str, int]:
+    """Count agents by their last action."""
+    counts: Counter[str] = Counter()
+    for agent in agents:
+        last_action = agent.state.last_recipe
+        if last_action:
+            counts[last_action] += 1
         else:
             counts["idle"] += 1
     return dict(counts)
-
 
 def compute_tick_snapshot(
     tick: int,
@@ -62,6 +76,37 @@ def compute_tick_snapshot(
     trade_volume: dict[str, int] = {g.value: 0 for g in Good}
     for t in trades:
         trade_volume[t.good.value] += t.quantity
+        """
+    if tick >450:
+        print(f"Median Money at {tick}:", statistics.median(a.state.money for a in agents))
+        print(f"Average Money at {tick}:", statistics.mean(a.state.money for a in agents))
+        print(f"Gini at {tick}:", gini_coefficient(wealths))
+        """
+
+    median = statistics.median(a.total_wealth(prices) for a in agents)
+    counter = Counter()
+    for a in agents:
+        if a.total_wealth(prices) > median:
+            counter[a.primary_activity()] += 1
+    #print(dict(counter))
+    """
+    counter = Counter()
+    wealth = Counter()
+    c1 = Counter()
+    
+    for a in agents:
+        activity = a.primary_activity()
+        if activity:
+            counter[activity] += a.state.money
+            wealth[activity] += a.total_wealth(prices)
+            c1[activity] += 1
+    
+    for k,v in wealth.items():
+        wealth[k] = v/c1[k]
+    print(dict(wealth))
+    """
+
+    food_per_capita = sum(agent.state.inventory_of(Good.FOOD) for agent in agents) / len(agents) if agents else 0
 
     price_snapshot = {g.value: prices.get(g, config.base_prices()[g]) for g in Good}
 
@@ -72,9 +117,12 @@ def compute_tick_snapshot(
         trade_volume=trade_volume,
         total_trades=len(trades),
         gini=round(gini_coefficient(wealths), 4),
+        last_action=compute_last_action(agents),
         specialization=compute_specialization(agents),
         avg_money=round(sum(money_values) / len(money_values), 2) if money_values else 0,
         total_money=round(sum(money_values), 2),
+        food_per_capita=round(food_per_capita, 2),
+        agents_alive = len(agents)
     )
 
 
@@ -97,4 +145,6 @@ class SimReport:
             "specialization_end": last.specialization,
             "prices_end": last.prices,
             "avg_money_end": last.avg_money,
+            "food_per_capita": last.food_per_capita,
+            "agents_alive": last.agents_alive,
         }

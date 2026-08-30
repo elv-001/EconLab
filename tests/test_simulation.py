@@ -6,6 +6,7 @@ import json
 
 from econ_sim.config import RECIPES, SimConfig
 from econ_sim.events import EventType
+from econ_sim.agent import create_agents
 from econ_sim.simulation import Simulation
 from econ_sim.types import Good
 
@@ -82,3 +83,55 @@ def test_full_state_snapshot():
     state = sim.full_state()
     assert state["tick"] == 30
     assert len(state["agents"]) == 15
+
+
+def test_food_decay():
+    config = SimConfig(
+        seed=1,
+        num_agents=1,
+        num_ticks=20,
+        food_shelf_life_ticks=5,
+        food_consumption_per_tick=0,
+    )
+    agent = create_agents(config, __import__("random").Random(1))[0]
+    agent.state.food_lots = [(10, 0)]
+    agent._sync_food_inventory()
+
+    spoiled = agent.decay_food(5)
+    assert spoiled == 10
+    assert agent.state.inventory_of(Good.FOOD) == 0
+
+    agent.add_food(8, tick=6)
+    assert agent.decay_food(10) == 0
+    assert agent.state.inventory_of(Good.FOOD) == 8
+    assert agent.decay_food(11) == 8
+
+
+def test_forage_crowding():
+    from econ_sim.config import forage_yield_per_agent
+
+    config = SimConfig(forage_crowding_half_life=10, forage_min_yield=1)
+    solo = forage_yield_per_agent(config, num_forgers=1, productivity=1.0, base_yield=2)
+    crowded = forage_yield_per_agent(
+        config, num_forgers=30, productivity=1.0, base_yield=2
+    )
+    assert solo == 2
+    assert crowded < solo
+    assert crowded >= config.forage_min_yield
+
+
+def test_forage_crowding_in_simulation():
+    config = SimConfig(seed=0, num_agents=40, num_ticks=1)
+    sim = Simulation(config=config)
+    sim.step()
+    forage_events = [
+        e
+        for e in sim.event_log.events
+        if e.event_type == EventType.PRODUCTION and e.data.get("recipe") == "forage"
+    ]
+    if len(forage_events) >= 2:
+        num_forgers = forage_events[0].data["num_forgers"]
+        assert num_forgers == len(forage_events)
+        yields = [e.data["outputs"]["food"] for e in forage_events]
+        if num_forgers > 1:
+            assert max(yields) <= 2

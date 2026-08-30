@@ -12,6 +12,7 @@ class EventType(str, Enum):
     BID = "bid"
     TRADE = "trade"
     TICK = "tick"
+    FOOD_DECAY = "food_decay"
     INVARIANT_VIOLATION = "invariant_violation"
 
 

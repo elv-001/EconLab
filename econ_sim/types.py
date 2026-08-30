@@ -15,10 +15,16 @@ class Recipe:
     name: str
     inputs: dict[Good, int]
     outputs: dict[Good, int]
+    domain: SkillDomain
+    min_skill: float
 
     def can_afford(self, inventory: dict[Good, int]) -> bool:
         return all(inventory.get(g, 0) >= qty for g, qty in self.inputs.items())
 
+class SkillDomain(Enum):
+    GATHERING = "gathering" # forage, chop wood
+    CARPENTRY = "carpentry" # craft tools
+    FARMING = "farming" # farming
 
 @dataclass
 class Order:
@@ -54,10 +60,12 @@ class AgentState:
     agent_id: int
     money: float
     inventory: dict[Good, int] = field(default_factory=lambda: {g: 0 for g in Good})
-    skills: dict[str, float] = field(default_factory=dict)
+    skills: dict[SkillDomain, float] = field(default_factory=dict)
     memory: dict[int, CounterpartyMemory] = field(default_factory=dict)
     last_recipe: str | None = None
     recipe_counts: dict[str, int] = field(default_factory=dict)
+    # FIFO food lots: (quantity, acquired_tick)
+    food_lots: list[tuple[int, int]] = field(default_factory=list)
 
     def inventory_of(self, good: Good) -> int:
         return self.inventory.get(good, 0)
@@ -66,6 +74,8 @@ class AgentState:
         self.inventory[good] = self.inventory.get(good, 0) + qty
 
     def remove_good(self, good: Good, qty: int) -> None:
+        if good == Good.FOOD:
+            raise ValueError("Use Agent food lot methods for food inventory")
         current = self.inventory.get(good, 0)
         if current < qty:
             raise ValueError(

@@ -83,13 +83,16 @@ def compute_tick_snapshot(
         print(f"Gini at {tick}:", gini_coefficient(wealths))
         """
 
+    """
     median = statistics.median(a.total_wealth(prices) for a in agents)
     counter = Counter()
+    e = 0
     for a in agents:
+        #e += a.state.inventory[Good.FOOD]
         if a.total_wealth(prices) > median:
             counter[a.primary_activity()] += 1
-    #print(dict(counter))
-    """
+    print(dict(counter))
+    #print(f"Tick {tick}: ", e - len(agents)* config.food_consumption_per_tick)
     counter = Counter()
     wealth = Counter()
     c1 = Counter()
@@ -108,7 +111,7 @@ def compute_tick_snapshot(
 
     food_per_capita = sum(agent.state.inventory_of(Good.FOOD) for agent in agents) / len(agents) if agents else 0
 
-    price_snapshot = {g.value: prices.get(g, config.base_prices()[g]) for g in Good}
+    price_snapshot = {g.value: round(prices.get(g, config.base_prices()[g]),2) for g in Good}
 
     return TickSnapshot(
         tick=tick,

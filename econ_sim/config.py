@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from econ_sim.types import Good, Recipe, SkillDomain
 
-
 @dataclass
 class SimConfig:
     """All economic rules and coefficients live here."""
@@ -52,12 +51,16 @@ class SimConfig:
     tool_urgency_weight: float = 1.5
     sell_value_weight: float = 0.4
 
+    # SimConfig
+    tool_max_uses: int = 5      # a tool survives this many farm cycles
+    tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
+
     # Bounded rationality: pick randomly among top-N scored recipes
     production_top_n: int = 2
 
     # Learning-by-doing: skill gain per use of a recipe
-    skill_gain_per_use: float = 0.03
-    skill_productivity_cap: float = 2.0
+    skill_gain_per_use: float = 0.01
+    skill_productivity_cap: float = 4.0
     skill_productivity_base: float = 1.0
 
     self_reliance_min: float = 0.7
@@ -110,7 +113,7 @@ class SimConfig:
 
 
 RECIPES: list[Recipe] = [
-    Recipe(name="forage", inputs={}, outputs={Good.FOOD: 3},
+    Recipe(name="forage", inputs={}, outputs={Good.FOOD: 2},
            domain=SkillDomain.GATHERING, min_skill=1.0),
     Recipe(name="chop_wood", inputs={}, outputs={Good.WOOD: 2},
            domain=SkillDomain.GATHERING, min_skill=1.0),
@@ -119,14 +122,14 @@ RECIPES: list[Recipe] = [
            inputs={Good.WOOD: 3}, 
            outputs={Good.TOOLS: 1},
            domain=SkillDomain.CARPENTRY, 
-           min_skill=1.2
+           min_skill=1.4
         ),
     Recipe(
-        name="hunt_farm",
+        name="farm",
         inputs={Good.TOOLS: 1},
-        outputs={Good.FOOD: 7},
+        outputs={Good.FOOD: 6},
         domain=SkillDomain.FARMING,
-        min_skill=1.3
+        min_skill=1.5
     ), 
 ]
 

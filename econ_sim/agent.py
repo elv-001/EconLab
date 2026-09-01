@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from email.mime import base
 import random
 from typing import TYPE_CHECKING
 
@@ -18,7 +17,7 @@ class Agent:
         rng: random.Random,
         skill_affinities: dict[SkillDomain, float] | None = None,
     ) -> None:
-        self.state = AgentState(agent_id=agent_id, money=config.initial_money)
+        self.state = AgentState(agent_id=agent_id, money=config.initial_money, self_reliance=0.5)
         self.config = config
         self.rng = rng
         self.skill_affinities = skill_affinities or {}
@@ -254,16 +253,23 @@ class Agent:
         for good, qty in recipe.inputs.items():
             if good == Good.FOOD:
                 self.remove_food(qty)
+            elif good == Good.TOOLS:
+                for _ in range(qty):
+                    if not self.use_tool():
+                        break
             else:
                 self.state.remove_good(good, qty)
 
         productivity = self._productivity(recipe.name)
         outputs: dict[str, int] = {}
         for good, base_qty in recipe.outputs.items():
+            qty = 0
             if recipe.name == "forage" and good == Good.FOOD:
                 qty = forage_yield_per_agent(
                     self.config, num_forgers, productivity, base_qty
                 )
+            elif good == Good.TOOLS:
+                self.add_tool(base_qty)
             else:
                 qty = max(1, int(base_qty * productivity)) if base_qty > 0 else 0
 
@@ -404,6 +410,24 @@ class Agent:
             return
         self.state.food_lots.append((qty, tick))
         self._sync_food_inventory()
+
+    def add_tool(self, qty: int) -> None:
+        for _ in range(qty):
+            self.state.tool_lots.append(self.config.tool_max_uses)
+        self._sync_tool_inventory()
+
+    def use_tool(self) -> bool:
+        """Consume one use from an existing tool. Returns False if no tool available."""
+        if not self.state.tool_lots:
+            return False
+        self.state.tool_lots[0] -= 1
+        if self.state.tool_lots[0] <= 0:
+            self.state.tool_lots.pop(0)
+        self._sync_tool_inventory()
+        return True
+
+    def _sync_tool_inventory(self) -> None:
+        self.state.inventory[Good.TOOLS] = len(self.state.tool_lots)
 
     def remove_food(self, qty: int) -> None:
         if qty <= 0:

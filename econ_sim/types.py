@@ -59,6 +59,7 @@ class CounterpartyMemory:
 class AgentState:
     agent_id: int
     money: float
+    self_reliance: float
     inventory: dict[Good, int] = field(default_factory=lambda: {g: 0 for g in Good})
     skills: dict[SkillDomain, float] = field(default_factory=dict)
     memory: dict[int, CounterpartyMemory] = field(default_factory=dict)
@@ -66,6 +67,10 @@ class AgentState:
     recipe_counts: dict[str, int] = field(default_factory=dict)
     # FIFO food lots: (quantity, acquired_tick)
     food_lots: list[tuple[int, int]] = field(default_factory=list)
+    tool_lots: list[int] = field(default_factory=list)
+    
+    current_goal: Good | None = None
+    alive: bool = True
 
     def inventory_of(self, good: Good) -> int:
         return self.inventory.get(good, 0)

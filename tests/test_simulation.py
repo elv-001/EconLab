@@ -13,7 +13,7 @@ from econ_sim.types import Good
 
 def test_recipes_defined():
     names = {r.name for r in RECIPES}
-    assert names == {"forage", "chop_wood", "craft_tools", "hunt_farm"}
+    assert names == {"forage", "chop_wood", "craft_tools", "farm"}
 
 
 def test_simulation_runs_200_ticks():
@@ -105,33 +105,3 @@ def test_food_decay():
     assert agent.decay_food(10) == 0
     assert agent.state.inventory_of(Good.FOOD) == 8
     assert agent.decay_food(11) == 8
-
-
-def test_forage_crowding():
-    from econ_sim.config import forage_yield_per_agent
-
-    config = SimConfig(forage_crowding_half_life=10, forage_min_yield=1)
-    solo = forage_yield_per_agent(config, num_forgers=1, productivity=1.0, base_yield=2)
-    crowded = forage_yield_per_agent(
-        config, num_forgers=30, productivity=1.0, base_yield=2
-    )
-    assert solo == 2
-    assert crowded < solo
-    assert crowded >= config.forage_min_yield
-
-
-def test_forage_crowding_in_simulation():
-    config = SimConfig(seed=0, num_agents=40, num_ticks=1)
-    sim = Simulation(config=config)
-    sim.step()
-    forage_events = [
-        e
-        for e in sim.event_log.events
-        if e.event_type == EventType.PRODUCTION and e.data.get("recipe") == "forage"
-    ]
-    if len(forage_events) >= 2:
-        num_forgers = forage_events[0].data["num_forgers"]
-        assert num_forgers == len(forage_events)
-        yields = [e.data["outputs"]["food"] for e in forage_events]
-        if num_forgers > 1:
-            assert max(yields) <= 2

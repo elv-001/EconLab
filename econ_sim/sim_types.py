@@ -8,7 +8,7 @@ class Good(str, Enum):
     FOOD = "food"
     WOOD = "wood"
     TOOLS = "tools"
-
+    SHELTER = "shelter"
 
 @dataclass(frozen=True)
 class Recipe:
@@ -17,14 +17,16 @@ class Recipe:
     outputs: dict[Good, int]
     domain: SkillDomain
     min_skill: float
+    tradeable: bool
 
     def can_afford(self, inventory: dict[Good, int]) -> bool:
         return all(inventory.get(g, 0) >= qty for g, qty in self.inputs.items())
 
 class SkillDomain(Enum):
-    GATHERING = "gathering" # forage, chop wood
-    CARPENTRY = "carpentry" # craft tools
-    FARMING = "farming" # farming
+    GATHERING = "gathering"      # forage, chop wood
+    CARPENTRY = "carpentry"      # craft tools
+    FARMING = "farming"          # farming
+    CONSTRUCTION = "construction" # build shelter
 
 @dataclass
 class Order:
@@ -71,6 +73,7 @@ class AgentState:
     
     current_goal: Good | None = None
     alive: bool = True
+    has_shelter: bool = False
 
     def inventory_of(self, good: Good) -> int:
         return self.inventory.get(good, 0)

@@ -30,10 +30,13 @@ class SimConfig:
     food_shelf_life_ticks: int = 5
     food_shelf_life_enabled: bool = True
 
+    # food consumption should increase without shelter
+    shelter_required: bool = False
+    shelter_productivity_loss = 0.8 # how efficiently can agents work without a shelter
+
     # Inventory targets (agents try to maintain these levels)
     target_food: int = 6
-    target_wood: int = 3
-    target_tools: int = 1
+    target_shelter: int = 1
     surplus_buffer: int = 1
 
     # Base reservation prices (used when no market history)
@@ -49,6 +52,7 @@ class SimConfig:
     food_urgency_weight: float = 2.0
     wood_urgency_weight: float = 1.0
     tool_urgency_weight: float = 1.5
+    shelter_urgency_weight: float = 1.5
     sell_value_weight: float = 0.4
 
     # SimConfig
@@ -105,44 +109,65 @@ class SimConfig:
         }
 
     def targets(self) -> dict[Good, int]:
-        return {
+        result =  {
             Good.FOOD: self.target_food,
-            Good.WOOD: self.target_wood,
-            Good.TOOLS: self.target_tools,
         }
+        if self.shelter_required:
+            result[Good.SHELTER] = self.target_shelter
+        return result
 
 
-RECIPES: list[Recipe] = [
+ALL_RECIPES: list[Recipe] = [
     Recipe(name="forage", inputs={}, outputs={Good.FOOD: 2},
-           domain=SkillDomain.GATHERING, min_skill=1.0),
+           domain=SkillDomain.GATHERING, min_skill=1.0, tradeable=True),
     Recipe(name="chop_wood", inputs={}, outputs={Good.WOOD: 2},
-           domain=SkillDomain.GATHERING, min_skill=1.0),
+           domain=SkillDomain.GATHERING, min_skill=1.0, tradeable=True),
     Recipe(
         name="craft_tools", 
            inputs={Good.WOOD: 3}, 
            outputs={Good.TOOLS: 1},
            domain=SkillDomain.CARPENTRY, 
-           min_skill=1.4
+           min_skill=1.4,
+           tradeable=True
         ),
     Recipe(
         name="farm",
         inputs={Good.TOOLS: 1},
         outputs={Good.FOOD: 6},
         domain=SkillDomain.FARMING,
-        min_skill=1.5
-    ), 
+        min_skill=1.5,
+        tradeable=True
+    ),
+    Recipe(
+        name="shelter",
+        inputs={Good.WOOD: 5, Good.TOOLS: 2},
+        outputs={Good.SHELTER: 1},
+        domain=SkillDomain.CONSTRUCTION,
+        min_skill=2.0,
+        tradeable=False
+    ),
 ]
 
-RECIPE_BY_NAME: dict[str, Recipe] = {r.name: r for r in RECIPES}
+RECIPE_BY_NAME: dict[str, Recipe] = {r.name: r for r in ALL_RECIPES}
 
-def _build_producers_by_good() -> dict[Good, list[Recipe]]:
+def _filter_recipes_by_config() -> list[Recipe]:
+    """Filter recipes based on SimConfig settings."""
+    filtered: list[Recipe] = []
+    for r in ALL_RECIPES:
+        if r.name == "shelter" and not SimConfig.shelter_required:
+            continue
+        filtered.append(r)
+    return filtered
+
+def _build_producers_by_good(filtered: list[Recipe]) -> dict[Good, list[Recipe]]:
     index: dict[Good, list[Recipe]] = {}
-    for r in RECIPES:
+    for r in filtered:
         for good in r.outputs:
             index.setdefault(good, []).append(r)
     return index
 
-_PRODUCERS_BY_GOOD = _build_producers_by_good()
+RECIPES = _filter_recipes_by_config()
+_PRODUCERS_BY_GOOD = _build_producers_by_good(RECIPES)
 
 def _chain_for_good(goal: Good) -> list[Recipe]:
     """All recipes relevant to reaching `goal`, direct or via prerequisites."""
@@ -161,8 +186,23 @@ def _chain_for_good(goal: Good) -> list[Recipe]:
 
     return [r for r in RECIPES if r.name in relevant]
 
+ENABLED_GOODS = [
+    Good.FOOD,
+    Good.WOOD,
+    Good.TOOLS,
+]
+
+TRADEABLE_GOODS = {
+    Good.FOOD,
+    Good.WOOD,
+    Good.TOOLS,
+}
+
+if SimConfig.shelter_required:
+    ENABLED_GOODS.append(Good.SHELTER)
+
 GOAL_CHAIN_RECIPES: dict[Good, list[Recipe]] = {
-    good: _chain_for_good(good) for good in Good
+    good: _chain_for_good(good) for good in ENABLED_GOODS
 }
 
 DEFAULT_CONFIG = SimConfig()

@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from econ_sim.agent import Agent
-from econ_sim.config import SimConfig
+from econ_sim.config import SimConfig, TRADEABLE_GOODS
 from econ_sim.sim_types import Good, TradeRecord
 
 
@@ -111,7 +111,7 @@ def compute_tick_snapshot(
 
     food_per_capita = sum(agent.state.inventory_of(Good.FOOD) for agent in agents) / len(agents) if agents else 0
 
-    price_snapshot = {g.value: round(prices.get(g, config.base_prices()[g]),2) for g in Good}
+    price_snapshot = {g.value: round(prices.get(g, config.base_prices()[g]),2) for g in TRADEABLE_GOODS}
 
     return TickSnapshot(
         tick=tick,

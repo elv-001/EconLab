@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from econ_sim.agent import Agent
 from econ_sim.config import SimConfig
-from econ_sim.types import Good, TradeRecord
+from econ_sim.sim_types import Good, TradeRecord
 
 
 @dataclass

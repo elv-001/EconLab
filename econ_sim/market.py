@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from econ_sim.types import Good, Order, TradeRecord
+from econ_sim.sim_types import Good, Order, TradeRecord
 
 
 @dataclass

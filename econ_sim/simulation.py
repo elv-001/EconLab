@@ -10,7 +10,7 @@ from econ_sim.config import SimConfig
 from econ_sim.events import EventLog, EventType
 from econ_sim.market import Market
 from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
-from econ_sim.types import Good, Recipe, TradeRecord
+from econ_sim.sim_types import Good, Recipe, TradeRecord
 
 
 @dataclass

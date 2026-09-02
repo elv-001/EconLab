@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from econ_sim.types import Good, Recipe, SkillDomain
+from econ_sim.sim_types import Good, Recipe, SkillDomain
 
 @dataclass
 class SimConfig:
@@ -27,7 +27,7 @@ class SimConfig:
     food_consumption_per_tick: int = 2
 
     # Food perishes after this many ticks in inventory
-    food_shelf_life_ticks: int = 6
+    food_shelf_life_ticks: int = 5
     food_shelf_life_enabled: bool = True
 
     # Inventory targets (agents try to maintain these levels)

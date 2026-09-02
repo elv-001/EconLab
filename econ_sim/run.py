@@ -9,6 +9,18 @@ from econ_sim.config import DEFAULT_CONFIG, SimConfig
 from econ_sim.metrics import SimReport
 from econ_sim.simulation import Simulation
 
+def run_once(config: SimConfig, quiet: bool = True) -> dict:
+    """Run a single simulation and return its summary dict. No printing, no argparse."""
+    sim = Simulation(config=config)
+
+    for _ in range(config.num_ticks):
+        sim.step()
+
+    report = SimReport(
+        snapshots=sim.snapshots,
+        final_agents=[a.snapshot() for a in sim.agents],
+    )
+    return report.summary()
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(

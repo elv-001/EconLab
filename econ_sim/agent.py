@@ -4,7 +4,7 @@ import random
 from typing import TYPE_CHECKING
 
 from econ_sim.config import GOAL_CHAIN_RECIPES, RECIPES, SimConfig, forage_yield_per_agent, RECIPE_BY_NAME
-from econ_sim.types import AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain
+from econ_sim.sim_types import AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain
 
 if TYPE_CHECKING:
     from econ_sim.events import EventLog

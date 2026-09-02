@@ -87,43 +87,22 @@ class Agent:
         recipe = RECIPE_BY_NAME[recipe_name]
         skill = self.state.skills.get(recipe.domain, 1.0)
         affinity = self.skill_affinities.get(recipe.domain, 1.0)
-        cap = self.config.skill_productivity_cap
-        base = self.config.skill_productivity_base
 
-        raw = base * skill * affinity
+        skill_factor = 1.0 + self.config.skill_effect * (skill - 1.0)
+        affinity_factor = 1.0 + self.config.affinity_effect * (affinity - 1.0)
+
+        cap = self.config.skill_productivity_cap
+
+        raw = skill_factor * affinity_factor
+
         if skill < recipe.min_skill:
             proficiency = skill / recipe.min_skill
             raw *= proficiency ** self.config.novice_penalty_exponent
 
         if self.config.shelter_required and not self.state.has_shelter and recipe_name != "shelter":
             raw *= self.config.shelter_productivity_loss
+
         return min(cap, raw)
-
-    def _self_production_cost(self, recipe: Recipe, good: Good) -> float:
-        productivity = self._productivity(recipe.name)
-        if productivity <= 0:
-            return float("inf")
-        base_prices = self.config.base_prices()
-        input_cost = sum(qty * base_prices.get(g, 1.0) for g, qty in recipe.inputs.items())
-        expected_output = recipe.outputs.get(good, 0) * productivity
-        if expected_output <= 0:
-            return float("inf")  # will likely produce nothing — not a real option
-
-        # cost per unit actually produced, accounting for waste from low skill
-        return input_cost / expected_output
-
-    # Compare to market price with self-reliance
-    def _should_make_good(self, recipe: Recipe, good: Good, market_prices: dict[Good, float] | None = None) -> bool:
-        # if the good can't be traded, the only choice is to make it
-        if good not in TRADEABLE_GOODS:
-            return True
-        market_price = (market_prices or {}).get(good, self.config.base_prices()[good])
-        make_cost = self._self_production_cost(recipe, good)
-        skill = self.state.skills.get(recipe.domain, 1.0)
-
-        if make_cost <= market_price * self.state.self_reliance or skill < recipe.min_skill:
-            return True
-        return False
 
     def _shelter_penalty_cost(self) -> float:
         """Estimate the economic cost of NOT having shelter, in the agent's own terms."""
@@ -189,45 +168,72 @@ class Agent:
             elif self.state.inventory_of(good) >= qty:
                 score -= 0.3 * self._urgency_weight(good)
 
-        skill = self._productivity(recipe.name)
-        score *= skill
+        return score
+
+    def _score_recipe_for_goal(self, recipe: Recipe, goal: Good | None, market_prices: dict[Good, float]) -> float:
+        score = 0.0
+
+        # If there are shortages, this increases score of recipe
+        if goal is not None:
+            depth = self._chain_depth_of(
+                recipe,
+                goal,
+                self.config.chain_depth,
+            )
+
+            goal_pressure = (
+                self._shortage(goal)
+                * self._urgency_weight(goal)
+            )
+
+            # Increases score based on urgency while discounting based on hops
+            score += (
+                goal_pressure
+                * self.config.chain_discount ** depth
+            )
+    
+        # Factors in economic productivity (skillset)
+        productivity = self._productivity(recipe.name)
+        revenue = sum(
+            qty * productivity * market_prices.get(
+                    good,
+                    self.config.base_prices()[good],
+            )
+            for good, qty in recipe.outputs.items()
+            if good in TRADEABLE_GOODS
+        )
+
+        cost = sum(
+            qty * market_prices.get(
+                good,
+                self.config.base_prices()[good],
+            )
+            for good, qty in recipe.inputs.items()
+        )
+
+        score += (revenue - cost) * self.config.profit_motivation
 
         return score
 
-    def _chain_score(self, recipe: Recipe, goal: Good, depth: int) -> float:
-        """Score a recipe that is a prerequisite toward `goal` but doesn't
-        produce it directly (e.g. chop_wood when the goal is food via tools).
-        Discounted by how many hops away it is from the goal."""
-        base = self._score_recipe(recipe)
-        discount = self.config.chain_discount ** depth
-        return base * discount * self._urgency_weight(goal)
-
     def choose_production(self, market_prices: dict[Good, float]) -> Recipe | None:
+        # this is probably eliminating orders 
         feasible = [r for r in RECIPES if r.can_afford(self.state.inventory)]
         if not feasible:
             return None
 
         goal = self._choose_goal()
 
-        if goal is not None:
-            chain = self._recipes_toward_good(goal)
-            chain_candidates = [r for r in feasible if r in chain] or feasible
+        chain = (self._recipes_toward_good(goal) if goal is not None else feasible)
+        scored = []
 
-            # looks at whether each good is worth producing
-            should_produce = [r for r in chain_candidates 
-                          if self._should_make_good(r, next(iter(r.outputs)), market_prices)]
-            candidates = should_produce or chain_candidates
-            scored = []
-            for r in candidates:
-                if r.outputs.get(goal, 0) > 0:
-                    scored.append((self._score_recipe(r), r))
-                else:
-                    # figure out how many hops this recipe is from the goal
-                    depth = self._chain_depth_of(r, goal, self.config.chain_depth)
-                    scored.append((self._chain_score(r, goal, depth), r))
-        else:
-            # No urgent shortages: pick whatever is most efficient in general.
-            scored = [(self._score_recipe(r), r) for r in feasible]
+        # Finds the value for each recipe
+        for recipe in chain:
+            score = self._score_recipe_for_goal(
+                recipe,
+                goal,
+                market_prices,
+            )
+            scored.append((score, recipe))
 
         scored.sort(key=lambda x: x[0], reverse=True)
 

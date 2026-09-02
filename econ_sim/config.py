@@ -63,8 +63,8 @@ class SimConfig:
     production_top_n: int = 2
 
     # Learning-by-doing: skill gain per use of a recipe
-    skill_gain_per_use: float = 0.01
-    skill_productivity_cap: float = 4.0
+    skill_gain_per_use: float = 0.03
+    skill_productivity_cap: float = 1.9
     skill_productivity_base: float = 1.0
 
     self_reliance_min: float = 0.7
@@ -72,6 +72,9 @@ class SimConfig:
 
     # punish not having the skill but mimicking it
     novice_penalty_exponent: float = 1.3
+
+    # profit motivator 
+    profit_motivation: float = 0.8
 
     # Trade memory
     memory_decay_ticks: int = 50
@@ -86,6 +89,9 @@ class SimConfig:
     # Random skill affinity at spawn (multiplier range)
     skill_affinity_min: float = 0.75
     skill_affinity_max: float = 1.35
+
+    skill_effect: float = 0.25
+    affinity_effect: float = 0.2
 
     # Price discovery smoothing (EMA alpha; clamp as fraction of base price)
     price_ema_alpha: float = 0.15
@@ -121,7 +127,7 @@ ALL_RECIPES: list[Recipe] = [
     Recipe(name="forage", inputs={}, outputs={Good.FOOD: 2},
            domain=SkillDomain.GATHERING, min_skill=1.0, tradeable=True),
     Recipe(name="chop_wood", inputs={}, outputs={Good.WOOD: 2},
-           domain=SkillDomain.GATHERING, min_skill=1.0, tradeable=True),
+           domain=SkillDomain.LUMBERJACK, min_skill=1.0, tradeable=True),
     Recipe(
         name="craft_tools", 
            inputs={Good.WOOD: 3}, 

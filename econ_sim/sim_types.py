@@ -24,6 +24,7 @@ class Recipe:
 
 class SkillDomain(Enum):
     GATHERING = "gathering"      # forage, chop wood
+    LUMBERJACK = "lumber"        # chop wood
     CARPENTRY = "carpentry"      # craft tools
     FARMING = "farming"          # farming
     CONSTRUCTION = "construction" # build shelter

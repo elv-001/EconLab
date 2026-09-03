@@ -45,7 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true", help="Only print final summary.")
     return p
 
-
 def print_progress(sim: Simulation, every: int = 50) -> None:
     if not sim.snapshots:
         return
@@ -89,8 +88,20 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 72)
     print("Summary")
     for k, v in summary.items():
+        if k == "skill_distribution":
+            continue
         print(f"  {k}: {v}")
 
+    print("-" * 72)
+    print("\nSkill Distribution")
+    print(f"  {'domain':<14}{'min':>8}{'max':>8}{'median':>8}{'stdev':>8}{'n':>6}")
+    for domain, stats in summary["skill_distribution"].items():
+        print(
+            f"  {domain:<14}{stats['min']:>8}{stats['max']:>8}"
+            f"{stats['median']:>8}{stats['stdev']:>8}{stats['n']:>6}"
+        )
+    print("-" * 72)
+    
     if args.agent_history is not None:
         history = sim.agent_history(args.agent_history)
         print(f"\nAgent {args.agent_history} history ({len(history)} events):")
@@ -110,7 +121,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nWrote outputs to {args.output_dir}/")
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

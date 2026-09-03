@@ -377,9 +377,12 @@ class Agent:
     def _apply_learning(self, recipe_name: str) -> None:
         recipe = RECIPE_BY_NAME[recipe_name]
         current = self.state.skills.get(recipe.domain, 1.0)
-        gain = self.config.skill_gain_per_use
         cap = self.config.skill_productivity_cap
-        self.state.skills[recipe.domain] = min(cap, current + gain)
+        
+        progress = (current - 1.0) / (cap - 1.0) # percentage completion compared to max
+        effective_gain = self.config.skill_gain_per_use * (1.0 - progress) ** self.config.skill_gain_decay_exponent
+
+        self.state.skills[recipe.domain] = min(cap, current + effective_gain)
 
     def reservation_bid_price(
         self, good: Good, market_prices: dict[Good, float] | None = None

@@ -1,7 +1,8 @@
 from __future__ import annotations
 import statistics
 
-from collections import Counter
+from collections import Counter, defaultdict
+import statistics
 from dataclasses import dataclass, field
 
 from econ_sim.agent import Agent
@@ -84,12 +85,11 @@ def compute_tick_snapshot(
     """
     median = statistics.median(a.total_wealth(prices) for a in agents)
     counter = Counter()
-    e = 0
     for a in agents:
-        #e += a.state.inventory[Good.FOOD]
         if a.total_wealth(prices) > median:
             counter[a.primary_activity()] += 1
     print(dict(counter))
+    
     #print(f"Tick {tick}: ", e - len(agents)* config.food_consumption_per_tick)
     counter = Counter()
     wealth = Counter()
@@ -148,4 +148,25 @@ class SimReport:
             "avg_money_end": last.avg_money,
             "food_per_capita": last.food_per_capita,
             "agents_alive": last.agents_alive,
+            "skill_distribution": self.skill_distribution(),
         }
+
+    def skill_distribution(self) -> dict[str, dict]:
+        """Per-domain skill stats across all final agents."""
+        by_domain: dict[str, list[float]] = defaultdict(list)
+        for agent in self.final_agents:
+            for domain, skill in agent.get("skills", {}).items():
+                by_domain[domain].append(skill)
+
+        result = {}
+        for domain, values in sorted(by_domain.items()):
+            if not values:
+                continue
+            result[domain] = {
+                "min": round(min(values), 3),
+                "max": round(max(values), 3),
+                "median": round(statistics.median(values), 3),
+                "stdev": round(statistics.stdev(values), 3) if len(values) > 1 else 0.0,
+                "n": len(values),
+            }
+        return result

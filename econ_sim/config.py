@@ -66,6 +66,7 @@ class SimConfig:
     skill_gain_per_use: float = 0.03
     skill_productivity_cap: float = 1.9
     skill_productivity_base: float = 1.0
+    skill_gain_decay_exponent: float = 2.0
 
     self_reliance_min: float = 0.7
     self_reliance_max: float = 1.6

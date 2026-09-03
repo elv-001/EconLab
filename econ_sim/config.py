@@ -42,7 +42,7 @@ class SimConfig:
     # Base reservation prices (used when no market history)
     base_price_food: float = 3.0
     base_price_wood: float = 2.0
-    base_price_tools: float = 4.0
+    base_price_tools: float = 7.0
 
     # Price adjustment from shortage/surplus (fraction of base price)
     shortage_premium: float = 0.5
@@ -56,7 +56,7 @@ class SimConfig:
     sell_value_weight: float = 0.4
 
     # SimConfig
-    tool_max_uses: int = 5      # a tool survives this many farm cycles
+    tool_max_uses: int = 7    # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
 
     # Bounded rationality: pick randomly among top-N scored recipes

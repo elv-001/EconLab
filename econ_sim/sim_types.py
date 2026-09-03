@@ -73,10 +73,13 @@ class AgentState:
     tool_lots: list[int] = field(default_factory=list)
     
     current_goal: Good | None = None
+    current_recipe: Recipe | None = None # current recipe being executed
     alive: bool = True
     has_shelter: bool = False
 
     def inventory_of(self, good: Good) -> int:
+        if good == Good.TOOLS:
+            return len(self.tool_lots)
         return self.inventory.get(good, 0)
 
     def add_good(self, good: Good, qty: int) -> None:

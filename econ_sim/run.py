@@ -54,9 +54,10 @@ def print_progress(sim: Simulation, every: int = 50) -> None:
         return
     spec = ", ".join(f"{k}={v}" for k, v in sorted(snap.specialization.items()))
     prices = ", ".join(f"{k}={v:.1f}" for k, v in sorted(snap.prices.items()))
+    alive = snap.agents_alive
     print(
         f"tick {snap.tick:4d} | trades={snap.total_trades:3d} | "
-        f"gini={snap.gini:.3f} | {prices} | {spec}"
+        f"gini={snap.gini:.3f} | {prices} | {spec} | alive={alive}"
     )
 
 

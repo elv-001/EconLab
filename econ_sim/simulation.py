@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Counter
 
 from econ_sim.agent import Agent, create_agents
 from econ_sim.config import SimConfig
@@ -53,9 +53,11 @@ class Simulation:
         )
 
     def step(self) -> TickSnapshot:
-        production_outputs = self._phase_production()
+        self._phase_decisions()
         bids, asks = self._phase_offers()
         trades = self._phase_matching(bids, asks)
+        production_outputs = self._phase_production()
+
         self._phase_housekeeping(trades)
         snapshot = compute_tick_snapshot(
             self.tick,
@@ -82,16 +84,29 @@ class Simulation:
         self.tick += 1
         return snapshot
 
+    def _phase_decisions(self):
+        for agent in self.agents:
+            agent.choose_goal(self.tick)
+            agent.choose_production(self._last_prices, self.tick)
+
     def _phase_production(self) -> dict[str, int]:
         totals: dict[str, int] = defaultdict(int)
         choices: list[tuple[Agent, Recipe]] = []
+        e=0
 
         for agent in self.agents:
-            recipe = agent.choose_production(self._last_prices)
+            recipe,f = agent.get_affordable_recipe(self._last_prices)
+            if not f:
+                e+=1
             if recipe is not None:
                 choices.append((agent, recipe))
-
+        #print(f"Fallback: {e}")
         num_forgers = sum(1 for _, recipe in choices if recipe.name == "forage")
+        recipe_counts = Counter(recipe.name for agent, recipe in choices)
+
+        #for recipe, count in recipe_counts.items():
+         #   print(f"{recipe}: {count} agent(s)")
+        #print("TOOLS:", sum(agent.state.inventory[Good.TOOLS] for agent in self.agents))
 
         for agent, recipe in choices:
             outputs = agent.execute_production(
@@ -143,6 +158,20 @@ class Simulation:
                         price=round(order.price, 2),
                     )
 
+        tool_bids = [o for o in bids if o.good == Good.TOOLS]
+        tool_asks = [o for o in asks if o.good == Good.TOOLS]
+
+        """
+        print(
+            f"TOOLS BOOK: "
+            f"bids={len(tool_bids)} "
+            f"bid_qty={sum(o.quantity for o in tool_bids)} "
+            f"asks={len(tool_asks)} "
+            f"ask_qty={sum(o.quantity for o in tool_asks)} "
+            f"max_bid={max((o.price for o in tool_bids), default=0):.2f} "
+            f"min_ask={min((o.price for o in tool_asks), default=0):.2f}"
+        )
+        """
         return bids, asks
 
     def _phase_matching(self, bids: list, asks: list) -> list[TradeRecord]:
@@ -151,6 +180,7 @@ class Simulation:
         )
         agent_map = {a.agent_id: a for a in self.agents}
 
+        tool_total = 0
         for trade in result.trades:
             buyer = agent_map[trade.buyer_id]
             seller = agent_map[trade.seller_id]
@@ -173,6 +203,10 @@ class Simulation:
             if trade.good == Good.FOOD:
                 buyer.add_food(trade.quantity, self.tick)
                 seller.remove_food(trade.quantity)
+            elif trade.good == Good.TOOLS:
+                tool_total += 1
+                buyer.add_tool(trade.quantity)
+                seller.remove_tool(trade.quantity)
             else:
                 buyer.state.add_good(trade.good, trade.quantity)
                 seller.state.remove_good(trade.good, trade.quantity)
@@ -196,7 +230,7 @@ class Simulation:
 
         if self.config.check_invariants:
             self._check_invariants(result.trades)
-
+        #print(f"Tools Traded: {tool_total}")
         return result.trades
 
     def _update_price(self, good: Good, trade_price: float) -> None:

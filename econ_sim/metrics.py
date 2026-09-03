@@ -24,7 +24,6 @@ class TickSnapshot:
     food_per_capita: float = 0.0
     agents_alive: int = 0
 
-
 def gini_coefficient(values: list[float]) -> float:
     if not values:
         return 0.0
@@ -37,7 +36,6 @@ def gini_coefficient(values: list[float]) -> float:
     for i, v in enumerate(sorted_vals, start=1):
         cumulative += i * v
     return (2 * cumulative) / (n * total) - (n + 1) / n
-
 
 def compute_specialization(agents: list[Agent]) -> dict[str, int]:
     """Count agents by their most-used recipe over the run."""

@@ -59,6 +59,52 @@ def print_progress(sim: Simulation, every: int = 50) -> None:
         f"gini={snap.gini:.3f} | {prices} | {spec} | alive={alive}"
     )
 
+def print_summary(report: SimReport) -> None:
+    summary = report.summary()
+    if not summary:
+        print("No data to summarize.")
+        return
+
+    print("-" * 72)
+    print("Summary")
+    for k, v in summary.items():
+        if k in ("skill_distribution", "wealth_by_archetype", "roles_by_archetype"):
+            continue
+        print(f"  {k}: {v}")
+
+    # Skill distribution
+    print("\nSkill Distribution")
+    print(f"  {'domain':<14}{'min':>8}{'max':>8}{'median':>8}{'stdev':>8}{'n':>6}")
+    for domain, stats in summary.get("skill_distribution", {}).items():
+        print(
+            f"  {domain:<14}{stats['min']:>8}{stats['max']:>8}"
+            f"{stats['median']:>8}{stats['stdev']:>8}{stats['n']:>6}"
+        )
+
+    # Wealth by archetype
+    wealth = summary.get("wealth_by_archetype", {})
+    if wealth:
+        print("\nWealth by Archetype")
+        print(f"  {'archetype':<16}{'min':>9}{'max':>9}{'median':>9}{'stdev':>9}{'n':>5}{'>median%':>10}")
+        for archetype, stats in wealth.items():
+            print(
+                f"  {archetype:<16}{stats['min']:>9}{stats['max']:>9}"
+                f"{stats['median']:>9}{stats['stdev']:>9}{stats['n']:>5}"
+                f"{stats['above_median_share']*100:>9.1f}%"
+            )
+
+    # Roles by archetype
+    roles = summary.get("roles_by_archetype", {})
+    if roles:
+        print("\nRoles by Archetype")
+        print(f"  {'archetype':<16}{'dominant_role':<16}{'share':>8}{'n':>5}   counts")
+        for archetype, stats in roles.items():
+            print(
+                f"  {archetype:<16}{str(stats['dominant_role']):<16}"
+                f"{stats['dominant_share']*100:>7.1f}%{stats['n']:>5}   {stats['counts']}"
+            )
+
+    print("-" * 72)
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
@@ -78,35 +124,20 @@ def main(argv: list[str] | None = None) -> int:
         sim.step()
         if not args.quiet:
             print_progress(sim)
-    e = 0
-    for agent in sim.agents:
-        if (agent.state.has_shelter):
-            e += 1
+
+    e = sum(1 for agent in sim.agents if agent.state.has_shelter)
     print(f"Has shelter: {e}")
 
+    # Single report construction – carries live agents/prices for archetype stats
     report = SimReport(
         snapshots=sim.snapshots,
         final_agents=[a.snapshot() for a in sim.agents],
+        _agents=sim.agents,
+        _prices=sim._last_prices,
     )
-    summary = report.summary()
 
-    print("-" * 72)
-    print("Summary")
-    for k, v in summary.items():
-        if k == "skill_distribution":
-            continue
-        print(f"  {k}: {v}")
+    print_summary(report)
 
-    print("-" * 72)
-    print("\nSkill Distribution")
-    print(f"  {'domain':<14}{'min':>8}{'max':>8}{'median':>8}{'stdev':>8}{'n':>6}")
-    for domain, stats in summary["skill_distribution"].items():
-        print(
-            f"  {domain:<14}{stats['min']:>8}{stats['max']:>8}"
-            f"{stats['median']:>8}{stats['stdev']:>8}{stats['n']:>6}"
-        )
-    print("-" * 72)
-    
     if args.agent_history is not None:
         history = sim.agent_history(args.agent_history)
         print(f"\nAgent {args.agent_history} history ({len(history)} events):")
@@ -122,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         (args.output_dir / "final_state.json").write_text(
             json.dumps(sim.full_state(), indent=2)
+        )
+        (args.output_dir / "report.json").write_text(
+            json.dumps(report.summary(), indent=2)
         )
         print(f"\nWrote outputs to {args.output_dir}/")
 

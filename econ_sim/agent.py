@@ -5,10 +5,13 @@ from typing import TYPE_CHECKING
 
 from econ_sim.config import (
     GOAL_CHAIN_RECIPES, RECIPES, SimConfig, RECIPE_BY_NAME, ENABLED_GOODS,
-    TRADEABLE_GOODS
+    TRADEABLE_GOODS, ARCHETYPE_MIX
 )
 
-from econ_sim.sim_types import AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain
+from econ_sim.sim_types import (
+    AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain, 
+    AgentArchetype, ARCHETYPES,
+)
 
 if TYPE_CHECKING:
     from econ_sim.events import EventLog
@@ -19,12 +22,16 @@ class Agent:
         agent_id: int,
         config: SimConfig,
         rng: random.Random,
-        skill_affinities: dict[SkillDomain, float] | None = None,
+        skill_affinities: dict[SkillDomain, float],
+        archetype: AgentArchetype | None
     ) -> None:
         self.state = AgentState(agent_id=agent_id, money=config.initial_money, self_reliance=0.5)
         self.config = config
         self.rng = rng
-        self.skill_affinities = skill_affinities or {}
+
+        self.archetype = archetype or ARCHETYPES["generalist"]
+        self.skill_affinities = skill_affinities
+        self.state.self_reliance = rng.uniform(*self.archetype.self_reliance_range)
 
         # Jitter starting money
         self.state.money += rng.uniform(-config.money_jitter, config.money_jitter)
@@ -34,7 +41,6 @@ class Agent:
 
         self.state.current_goal = None
         self.state.alive = True
-        self.state.self_reliance = rng.uniform(config.self_reliance_min, config.self_reliance_max)
 
         """
         if self.agent_id % 10 == 0:
@@ -140,7 +146,7 @@ class Agent:
 
         if skill < recipe.min_skill:
             proficiency = skill / recipe.min_skill
-            raw *= proficiency ** self.config.novice_penalty_exponent
+            raw *= proficiency ** self.archetype.novice_penalty_exponent
 
         if self.config.shelter_required and not self.state.has_shelter and recipe_name != "shelter":
             raw *= (1 - self.config.shelter_productivity_loss)
@@ -205,7 +211,7 @@ class Agent:
         # shortages that are close in magnitude.
         if self.state.current_goal is not None:
             current_score = dict(candidates).get(self.state.current_goal)
-            if current_score is not None and current_score >= best_score * self.config.goal_stickiness:
+            if current_score is not None and current_score >= best_score * self.archetype.goal_stickiness:
                 return self.state.current_goal
 
         self.state.current_goal = best_good
@@ -252,7 +258,7 @@ class Agent:
             for good, qty in recipe.inputs.items()
         ))
 
-        score += (revenue - cost) * self.config.profit_motivation
+        score += (revenue - cost) * self.archetype.profit_motivation
         return score
 
     def choose_production(self, market_prices: dict[Good, float], current_tick: int) -> Recipe | None:
@@ -607,14 +613,33 @@ class Agent:
             "memory_size": len(self.state.memory),
         }
 
+def create_agents(
+    config: SimConfig,
+    rng: random.Random,
+) -> list[Agent]:
+    """Create agents, optionally drawn from a mix of personality archetypes.
 
-def create_agents(config: SimConfig, rng: random.Random) -> list[Agent]:
+    archetype_mix: e.g. {"generalist": 0.5, "hoarder": 0.5}. Weights don't need
+    to sum to 1 — rng.choices normalizes them. Defaults to 100% generalist,
+    which reproduces the existing validated baseline exactly.
+    """
+    archetype_mix = ARCHETYPE_MIX or {"generalist": 1.0}
+    names = list(archetype_mix.keys())
+    weights = list(archetype_mix.values())
+
+    invalid_names = [name for name in names if name not in ARCHETYPES]
+    if invalid_names:
+        raise ValueError(f"Invalid Archetype Name: {invalid_names}")
+
     agents: list[Agent] = []
     for i in range(config.num_agents):
+        archetype = ARCHETYPES[rng.choices(names, weights=weights, k=1)[0]]
+
         affinities = {
             # may use bell curve in future, more realistic
             domain: rng.uniform(config.skill_affinity_min, config.skill_affinity_max)
+            * archetype.affinity_bias.get(domain, 1.0)
             for domain in SkillDomain
         }
-        agents.append(Agent(i, config, rng, affinities))
-    return agents 
+        agents.append(Agent(i, config, rng, affinities, archetype))
+    return agents

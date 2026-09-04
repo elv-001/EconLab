@@ -1,5 +1,6 @@
 from __future__ import annotations
 import statistics
+from typing import Any
 
 from collections import Counter, defaultdict
 import statistics
@@ -126,19 +127,24 @@ def compute_tick_snapshot(
         agents_alive = len(agents)
     )
 
-
 @dataclass
 class SimReport:
     snapshots: list[TickSnapshot] = field(default_factory=list)
     final_agents: list[dict] = field(default_factory=list)
 
-    def summary(self) -> dict:
+    # Optional live objects – only needed for wealth/role breakdowns
+    _agents: list[Any] | None = field(default=None, repr=False)
+    _prices: dict | None = field(default=None, repr=False)
+
+    def summary(self, include_archetypes: bool = True) -> dict:
         if not self.snapshots:
             return {}
+
         first = self.snapshots[0]
         last = self.snapshots[-1]
         total_trades = sum(s.total_trades for s in self.snapshots)
-        return {
+
+        result = {
             "ticks_run": last.tick + 1,
             "total_trades": total_trades,
             "gini_start": first.gini,
@@ -151,8 +157,13 @@ class SimReport:
             "skill_distribution": self.skill_distribution(),
         }
 
+        if include_archetypes and self._agents is not None and self._prices is not None:
+            result["wealth_by_archetype"] = self.wealth_by_archetype()
+            result["roles_by_archetype"] = self.role_by_archetype()
+
+        return result
+
     def skill_distribution(self) -> dict[str, dict]:
-        """Per-domain skill stats across all final agents."""
         by_domain: dict[str, list[float]] = defaultdict(list)
         for agent in self.final_agents:
             for domain, skill in agent.get("skills", {}).items():
@@ -170,3 +181,55 @@ class SimReport:
                 "n": len(values),
             }
         return result
+
+    def wealth_by_archetype(self) -> dict[str, dict]:
+        """Requires live agents + prices (set at construction)."""
+        if self._agents is None or self._prices is None:
+            return {}
+
+        median_wealth = statistics.median(a.total_wealth(self._prices) for a in self._agents)
+        by_archetype: dict[str, list[float]] = defaultdict(list)
+
+        for a in self._agents:
+            by_archetype[a.archetype.name].append(a.total_wealth(self._prices))
+
+        result = {}
+        for archetype, values in sorted(by_archetype.items()):
+            if not values:
+                continue
+            above = sum(1 for v in values if v > median_wealth)
+            result[archetype] = {
+                "min": round(min(values), 2),
+                "max": round(max(values), 2),
+                "median": round(statistics.median(values), 2),
+                "stdev": round(statistics.stdev(values), 2) if len(values) > 1 else 0.0,
+                "n": len(values),
+                "above_median_pop": above,
+                "below_median_pop": len(values) - above,
+                "above_median_share": round(above / len(values), 3),
+            }
+        return result
+
+    def role_by_archetype(self) -> dict[str, dict]:
+        if self._agents is None:
+            return {}
+
+        by_archetype: dict[str, Counter] = defaultdict(Counter)
+        for a in self._agents:
+            activity = a.primary_activity()
+            by_archetype[a.archetype.name][activity] += 1
+
+        result = {}
+        for archetype, counts in sorted(by_archetype.items()):
+            total = sum(counts.values())
+            if total == 0:
+                continue
+            dominant = counts.most_common(1)[0] if counts else (None, 0)
+            result[archetype] = {
+                "counts": dict(counts),
+                "n": total,
+                "dominant_role": dominant[0],
+                "dominant_share": round(dominant[1] / total, 3) if total else 0.0,
+            }
+        return result
+    

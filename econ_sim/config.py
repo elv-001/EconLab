@@ -21,7 +21,6 @@ class SimConfig:
     endowment_jitter: int = 3  # random +/- on starting goods
 
     input_cost_weight: float = 0.15  # penalty for using inputs in production
-    goal_stickiness = 0.85
 
     # Survival: agents consume food each tick
     food_consumption_per_tick: int = 2
@@ -67,15 +66,6 @@ class SimConfig:
     skill_productivity_cap: float = 1.9
     skill_productivity_base: float = 1.0
     skill_gain_decay_exponent: float = 2.0
-
-    self_reliance_min: float = 0.7
-    self_reliance_max: float = 1.6
-
-    # punish not having the skill but mimicking it
-    novice_penalty_exponent: float = 1.3
-
-    # profit motivator 
-    profit_motivation: float = 0.8
 
     # Trade memory
     memory_decay_ticks: int = 50
@@ -123,6 +113,11 @@ class SimConfig:
             result[Good.SHELTER] = self.target_shelter
         return result
 
+# ARCHETYPE MIX
+ARCHETYPE_MIX: dict[str, float] = {
+    "generalist": 0.5,
+    "trader": 0.5,
+}
 
 ALL_RECIPES: list[Recipe] = [
     Recipe(name="forage", inputs={}, outputs={Good.FOOD: 2},

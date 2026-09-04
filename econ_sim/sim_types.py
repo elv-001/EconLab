@@ -94,3 +94,25 @@ class AgentState:
                 f"Agent {self.agent_id} insufficient {good.value}: have {current}, need {qty}"
             )
         self.inventory[good] = current - qty
+
+@dataclass
+class AgentArchetype:
+    name: str
+    affinity_bias: dict[SkillDomain, float] = field(default_factory=lambda: {d: 1.0 for d in SkillDomain})
+    self_reliance_range: tuple[float, float] = (0.7, 1.6)   # defaults match current global range
+    goal_stickiness: float = 0.85                            # defaults match current global constant
+    novice_penalty_exponent: float = 1.3
+    profit_motivation: float = 0.8
+    planning_depth_long: int = 3
+
+ARCHETYPES: dict[str, AgentArchetype] = {
+    "generalist": AgentArchetype(name="generalist"),
+
+    "trader": AgentArchetype(
+        name="trader",
+        affinity_bias={d: 0.9 for d in SkillDomain},
+        self_reliance_range=(0.5, 0.7),
+        goal_stickiness=0.6,
+        profit_motivation=1.2,
+    ),
+}

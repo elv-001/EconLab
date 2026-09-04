@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from typing import TYPE_CHECKING
+from collections import deque, Counter
 
 from econ_sim.config import (
     GOAL_CHAIN_RECIPES, RECIPES, SimConfig, RECIPE_BY_NAME, ENABLED_GOODS,
@@ -41,6 +42,8 @@ class Agent:
 
         self.state.current_goal = None
         self.state.alive = True
+
+        self.state.recent_recipes = deque(maxlen=100)
 
         """
         if self.agent_id % 10 == 0:
@@ -385,6 +388,7 @@ class Agent:
             self.state.recipe_counts.get(recipe.name, 0) + 1
         )
         self._apply_learning(recipe.name)
+        self.state.recent_recipes.append(recipe.name)
         return outputs
 
     def _apply_learning(self, recipe_name: str) -> None:
@@ -512,10 +516,12 @@ class Agent:
         )
         return self.state.money + goods_value
 
-    def primary_activity(self) -> str | None:
-        if not self.state.recipe_counts:
+    def primary_activity(self, window=80) -> str | None:
+        recent = getattr(self.state, "recent_recipes", None)
+        if not recent:
             return self.state.last_recipe
-        return max(self.state.recipe_counts, key=self.state.recipe_counts.get)  # type: ignore[arg-type]
+        samples = list(recent)[-window:]
+        return Counter(samples).most_common(1)[0][0]
 
     def add_food(self, qty: int, tick: int) -> None:
         if qty <= 0:

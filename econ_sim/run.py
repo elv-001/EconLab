@@ -51,12 +51,12 @@ def print_progress(sim: Simulation, every: int = 50) -> None:
     snap = sim.snapshots[-1]
     if snap.tick % every != 0 and snap.tick != sim.config.num_ticks - 1:
         return
-    spec = ", ".join(f"{k}={v}" for k, v in sorted(snap.specialization.items()))
+    last_action = ", ".join(f"{k}={v}" for k, v in sorted(snap.last_action.items()))
     prices = ", ".join(f"{k}={v:.1f}" for k, v in sorted(snap.prices.items()))
     alive = snap.agents_alive
     print(
         f"tick {snap.tick:4d} | trades={snap.total_trades:3d} | "
-        f"gini={snap.gini:.3f} | {prices} | {spec} | alive={alive}"
+        f"gini={snap.gini:.3f} | {prices} | {last_action} | alive={alive}"
     )
 
 def print_summary(report: SimReport) -> None:

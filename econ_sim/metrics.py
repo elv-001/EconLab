@@ -39,11 +39,11 @@ def gini_coefficient(values: list[float]) -> float:
         cumulative += i * v
     return (2 * cumulative) / (n * total) - (n + 1) / n
 
-def compute_specialization(agents: list[Agent]) -> dict[str, int]:
-    """Count agents by their most-used recipe over the run."""
+def compute_specializations(agents: list[Agent]) -> dict[str, int]:
+    """Count agents by last recipe over the run."""
     counts: Counter[str] = Counter()
     for agent in agents:
-        activity = agent.state.last_recipe
+        activity = agent.primary_activity()
         if activity:
            counts[activity] += 1
         else:
@@ -120,7 +120,7 @@ def compute_tick_snapshot(
         total_trades=len(trades),
         gini=round(gini_coefficient(wealths), 4),
         last_action=compute_last_action(agents),
-        specialization=compute_specialization(agents),
+        specialization=compute_specializations(agents),
         avg_money=round(sum(money_values) / len(money_values), 2) if money_values else 0,
         total_money=round(sum(money_values), 2),
         food_per_capita=round(food_per_capita, 2),

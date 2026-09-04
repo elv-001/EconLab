@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-
+from collections import deque
 
 class Good(str, Enum):
     FOOD = "food"
@@ -77,6 +77,8 @@ class AgentState:
     alive: bool = True
     has_shelter: bool = False
 
+    recent_recipes: deque[str] = field(default_factory=deque)
+
     def inventory_of(self, good: Good) -> int:
         if good == Good.TOOLS:
             return len(self.tool_lots)
@@ -97,6 +99,7 @@ class AgentState:
 
 @dataclass
 class AgentArchetype:
+    # should add risk_tolerance and time_preference
     name: str
     affinity_bias: dict[SkillDomain, float] = field(default_factory=lambda: {d: 1.0 for d in SkillDomain})
     self_reliance_range: tuple[float, float] = (0.7, 1.6)   # defaults match current global range

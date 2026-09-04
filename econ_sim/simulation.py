@@ -101,7 +101,6 @@ class Simulation:
             if recipe is not None:
                 choices.append((agent, recipe))
         #print(f"Fallback: {e}")
-        num_forgers = sum(1 for _, recipe in choices if recipe.name == "forage")
         recipe_counts = Counter(recipe.name for agent, recipe in choices)
 
         #for recipe, count in recipe_counts.items():
@@ -110,7 +109,7 @@ class Simulation:
 
         for agent, recipe in choices:
             outputs = agent.execute_production(
-                recipe, tick=self.tick, num_forgers=num_forgers
+                recipe, tick=self.tick
             )
             for good, qty in outputs.items():
                 totals[good] += qty
@@ -118,8 +117,7 @@ class Simulation:
                 "recipe": recipe.name,
                 "outputs": outputs,
             }
-            if recipe.name == "forage":
-                log_data["num_forgers"] = num_forgers
+
             self.event_log.record(
                 self.tick,
                 EventType.PRODUCTION,

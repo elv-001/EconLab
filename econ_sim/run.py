@@ -78,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
         sim.step()
         if not args.quiet:
             print_progress(sim)
+    e = 0
+    for agent in sim.agents:
+        if (agent.state.has_shelter):
+            e += 1
+    print(f"Has shelter: {e}")
 
     report = SimReport(
         snapshots=sim.snapshots,

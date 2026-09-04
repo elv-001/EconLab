@@ -4,7 +4,7 @@ import random
 from typing import TYPE_CHECKING
 
 from econ_sim.config import (
-    GOAL_CHAIN_RECIPES, RECIPES, SimConfig, forage_yield_per_agent, RECIPE_BY_NAME, ENABLED_GOODS,
+    GOAL_CHAIN_RECIPES, RECIPES, SimConfig, RECIPE_BY_NAME, ENABLED_GOODS,
     TRADEABLE_GOODS
 )
 
@@ -75,6 +75,12 @@ class Agent:
                 - self.state.inventory_of(good),
             )
 
+        if good == Good.SHELTER:
+            if self.state.has_shelter:
+                return 0
+            return 1
+
+        # It finds shortages in goods that the current recipe needs
         recipe = self.state.current_recipe
         if recipe is None:
             return 0
@@ -137,22 +143,26 @@ class Agent:
             raw *= proficiency ** self.config.novice_penalty_exponent
 
         if self.config.shelter_required and not self.state.has_shelter and recipe_name != "shelter":
-            raw *= self.config.shelter_productivity_loss
+            raw *= (1 - self.config.shelter_productivity_loss)
 
         return min(cap, raw)
 
-    """
     def _shelter_penalty_cost(self) -> float:
-        if self.state.has_shelter or self.config.shelter_required is False:
+        """Economic cost of NOT having shelter, expressed on the same scale
+        as other goal-urgency scores (shortage * urgency_weight)."""
+        if self.state.has_shelter or not self.config.shelter_required:
             return 0.0
-        # Measures the economic value of the best recipe the agent could make if it had shelter as a score
+
+        feasible = [r for r in RECIPES if r.can_afford(self.state.inventory)]
+        if not feasible:
+            return 0.0
+
         best_value = max(
-            (self._score_recipe_for_goal(r, None, {}) for r in RECIPES if r.can_afford(self.state.inventory)),
-            default=0.0,
+            self._score_recipe_for_goal(r, None, {}) for r in feasible
         )
-        # returns the discounted factor
-        return best_value * self.config.shelter_productivity_loss
-    """
+        # best_value can be negative (a bad recipe); a negative "loss" doesn't
+        # make sense as an urgency signal, so floor at 0.
+        return max(0.0, best_value) * (1 - self.config.shelter_productivity_loss)
 
     def _food_critical(self, current_tick: int) -> bool:
         total = self.state.inventory_of(Good.FOOD)
@@ -174,13 +184,12 @@ class Agent:
         shortages = [
             (good, self._shortage(good) * self._urgency_weight(good))
             for good in ENABLED_GOODS
-            if self._shortage(good) > 0
+            if self._shortage(good) > 0 and good != Good.SHELTER
         ]
 
-        # SHELTERS CURRENTLY DISABLED
-        #shelter_cost = self._shelter_penalty_cost()
-        #if shelter_cost > 0 and self.config.shelter_required:
-         #   shortages.append((Good.SHELTER, shelter_cost))
+        shelter_cost = self._shelter_penalty_cost()
+        if shelter_cost > 0:
+            shortages.append((Good.SHELTER, shelter_cost))
 
         if shortages:
             candidates = shortages
@@ -248,7 +257,6 @@ class Agent:
 
     def choose_production(self, market_prices: dict[Good, float], current_tick: int) -> Recipe | None:
         goal = self.state.current_goal
-
         if goal == Good.FOOD and self._food_critical(current_tick):
             # Get FOOD ASAP
             candidates = [r for r in RECIPES if r.outputs.get(Good.FOOD, 0) > 0 and r.can_afford(self.state.inventory)]
@@ -329,7 +337,6 @@ class Agent:
         self,
         recipe: Recipe,
         tick: int,
-        num_forgers: int = 1,
     ) -> dict[str, int]:
         for good, qty in recipe.inputs.items():
             if good == Good.FOOD:
@@ -346,20 +353,20 @@ class Agent:
         outputs: dict[str, int] = {}
         for good, base_qty in recipe.outputs.items():
             qty = 0
-            if recipe.name == "forage" and good == Good.FOOD:
-                qty = forage_yield_per_agent(
-                    self.config, num_forgers, productivity, base_qty
-                )
-            elif good == Good.TOOLS:
+            if good == Good.TOOLS:
                 if productivity >= 1.0:
                     qty = max(1, int(base_qty * productivity))  # skilled carpenters can exceed base output
                 else:
                     qty = 1 if productivity > 0 else 0 
                 self.add_tool(int(qty))
             elif good == Good.SHELTER:
-                self.state.has_shelter = True
+                skill = self.state.skills.get(recipe.domain, 1.0)
+                if skill >= recipe.min_skill:
+                    self.state.has_shelter = True
             else:
-                qty = max(1, int(base_qty * productivity)) if base_qty > 0 else 0
+                # this makes it round to nearest number instead of 0, so foragers get 2 instead of 1 food
+                # probably worth investigating in the future
+                qty = max(1, int(round((base_qty * productivity)))) if base_qty > 0 else 0
 
             if good == Good.FOOD:
                 self.add_food(qty, tick)
@@ -376,6 +383,11 @@ class Agent:
 
     def _apply_learning(self, recipe_name: str) -> None:
         recipe = RECIPE_BY_NAME[recipe_name]
+
+        # There should be no skill to foraging, it is a minimum survival action
+        if (recipe.domain == SkillDomain.GATHERING):
+            return
+        
         current = self.state.skills.get(recipe.domain, 1.0)
         cap = self.config.skill_productivity_cap
         

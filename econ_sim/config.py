@@ -31,8 +31,8 @@ class SimConfig:
     food_shelf_life_enabled: bool = True
 
     # food consumption should increase without shelter
-    shelter_required: bool = False
-    shelter_productivity_loss = 0.8 # how efficiently can agents work without a shelter
+    shelter_required: bool = True
+    shelter_productivity_loss = 0.2  # how much producitivity is lost without shelter
 
     # Inventory targets (agents try to maintain these levels)
     target_food: int = 6
@@ -52,7 +52,7 @@ class SimConfig:
     food_urgency_weight: float = 2.0
     wood_urgency_weight: float = 1.0
     tool_urgency_weight: float = 1.5
-    shelter_urgency_weight: float = 1.5
+    shelter_urgency_weight: float = 1.7
     sell_value_weight: float = 0.4
 
     # SimConfig
@@ -147,11 +147,11 @@ ALL_RECIPES: list[Recipe] = [
     ),
     Recipe(
         name="shelter",
-        inputs={Good.WOOD: 5, Good.TOOLS: 2},
+        inputs={Good.WOOD: 3, Good.TOOLS: 1},
         outputs={Good.SHELTER: 1},
         domain=SkillDomain.CONSTRUCTION,
-        min_skill=2.0,
-        tradeable=False
+        min_skill=1.0,
+        tradeable=True
     ),
 ]
 
@@ -199,11 +199,11 @@ ENABLED_GOODS = [
     Good.TOOLS,
 ]
 
-TRADEABLE_GOODS = {
+TRADEABLE_GOODS = [
     Good.FOOD,
     Good.WOOD,
     Good.TOOLS,
-}
+]
 
 if SimConfig.shelter_required:
     ENABLED_GOODS.append(Good.SHELTER)
@@ -213,12 +213,3 @@ GOAL_CHAIN_RECIPES: dict[Good, list[Recipe]] = {
 }
 
 DEFAULT_CONFIG = SimConfig()
-
-# ignore for now
-def forage_yield_per_agent(
-    config: SimConfig, num_forgers: int, productivity: float, base_yield: int
-) -> int:
-    """Shared foraging pool: more foragers means less food per person."""
-    if num_forgers <= 0:
-        return 0
-    return RECIPES[0].outputs[Good.FOOD]

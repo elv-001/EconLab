@@ -31,17 +31,26 @@ class SimConfig:
 
     # food consumption should increase without shelter
     shelter_required: bool = True
-    shelter_productivity_loss = 0.2  # how much producitivity is lost without shelter
+    shelter_productivity_loss = 0.25  # how much producitivity is lost without shelter
 
     # Inventory targets (agents try to maintain these levels)
     target_food: int = 6
     target_shelter: int = 1
     surplus_buffer: int = 1
 
+    # Clothing
+    clothing_enabled: bool = True
+    target_clothes: int = 3
+    comfort_consumption_per_tick: float = 0.25  # slower "wear rate" than food's per-tick eating
+    comfort_urgency_weight: float = 1.3        # below food/tools, above pure luxury
+    comfort_productivity_loss: float = 0.1
+
     # Base reservation prices (used when no market history)
     base_price_food: float = 3.0
     base_price_wood: float = 2.0
     base_price_tools: float = 7.0
+    base_price_fiber: float = 1.5
+    base_price_clothes: float = 4.0
 
     # Price adjustment from shortage/surplus (fraction of base price)
     shortage_premium: float = 0.5
@@ -49,8 +58,6 @@ class SimConfig:
 
     # Production scoring weights
     food_urgency_weight: float = 2.0
-    wood_urgency_weight: float = 1.0
-    tool_urgency_weight: float = 1.5
     shelter_urgency_weight: float = 1.7
     sell_value_weight: float = 0.4
 
@@ -65,7 +72,8 @@ class SimConfig:
     skill_gain_per_use: float = 0.03
     skill_productivity_cap: float = 1.9
     skill_productivity_base: float = 1.0
-    skill_gain_decay_exponent: float = 2.0
+    skill_gain_decay_exponent: float = 3
+    skill_decay_per_tick: float = 0.005
 
     # Trade memory
     memory_decay_ticks: int = 50
@@ -81,7 +89,8 @@ class SimConfig:
     skill_affinity_min: float = 0.75
     skill_affinity_max: float = 1.35
 
-    skill_effect: float = 0.25
+    # impact of skill to productivity; higher value should magnify comparative advantage
+    skill_effect: float = 0.3
     affinity_effect: float = 0.2
 
     # Price discovery smoothing (EMA alpha; clamp as fraction of base price)
@@ -103,11 +112,13 @@ class SimConfig:
             Good.FOOD: self.base_price_food,
             Good.WOOD: self.base_price_wood,
             Good.TOOLS: self.base_price_tools,
+            Good.FIBER: self.base_price_fiber,
+            Good.CLOTHES: self.base_price_clothes,
         }
 
     def targets(self) -> dict[Good, int]:
         result =  {
-            Good.FOOD: self.target_food,
+            Good.FOOD: self.target_food, Good.CLOTHES: self.target_clothes
         }
         if self.shelter_required:
             result[Good.SHELTER] = self.target_shelter
@@ -115,30 +126,28 @@ class SimConfig:
 
 # ARCHETYPE MIX
 ARCHETYPE_MIX: dict[str, float] = {
-    "generalist": 0.5,
-    "trader": 0.5,
+    "generalist": 1.0,
+    #"trader": 0.5,
 }
 
 ALL_RECIPES: list[Recipe] = [
     Recipe(name="forage", inputs={}, outputs={Good.FOOD: 2},
-           domain=SkillDomain.GATHERING, min_skill=1.0, tradeable=True),
+           domain=SkillDomain.GATHERING, min_skill=1.0),
     Recipe(name="chop_wood", inputs={}, outputs={Good.WOOD: 2},
-           domain=SkillDomain.LUMBERJACK, min_skill=1.0, tradeable=True),
+           domain=SkillDomain.LUMBERJACK, min_skill=1.0),
     Recipe(
         name="craft_tools", 
            inputs={Good.WOOD: 3}, 
            outputs={Good.TOOLS: 1},
            domain=SkillDomain.CARPENTRY, 
-           min_skill=1.4,
-           tradeable=True
+           min_skill=1.3,
         ),
     Recipe(
         name="farm",
         inputs={Good.TOOLS: 1},
-        outputs={Good.FOOD: 6},
+        outputs={Good.FOOD: 7},
         domain=SkillDomain.FARMING,
         min_skill=1.5,
-        tradeable=True
     ),
     Recipe(
         name="shelter",
@@ -146,7 +155,18 @@ ALL_RECIPES: list[Recipe] = [
         outputs={Good.SHELTER: 1},
         domain=SkillDomain.CONSTRUCTION,
         min_skill=1.0,
-        tradeable=True
+    ),
+    Recipe(name="gather_fiber", 
+           inputs={}, 
+           outputs={Good.FIBER: 2},
+           domain=SkillDomain.GATHERING, 
+           min_skill=1.0, 
+    ),
+    Recipe(name="weave_cloth", 
+           inputs={Good.FIBER: 4}, 
+           outputs={Good.CLOTHES: 1},
+           domain=SkillDomain.WEAVING, 
+           min_skill=1.4, 
     ),
 ]
 
@@ -158,6 +178,9 @@ def _filter_recipes_by_config() -> list[Recipe]:
     for r in ALL_RECIPES:
         if r.name == "shelter" and not SimConfig.shelter_required:
             continue
+        if (r.name == "gather_fiber" or r.name == "weave_cloth") and not SimConfig.clothing_enabled:
+            continue
+
         filtered.append(r)
     return filtered
 
@@ -202,6 +225,11 @@ TRADEABLE_GOODS = [
 
 if SimConfig.shelter_required:
     ENABLED_GOODS.append(Good.SHELTER)
+if SimConfig.clothing_enabled:
+    ENABLED_GOODS.append(Good.FIBER)
+    ENABLED_GOODS.append(Good.CLOTHES)
+    TRADEABLE_GOODS.append(Good.FIBER)
+    TRADEABLE_GOODS.append(Good.CLOTHES)
 
 GOAL_CHAIN_RECIPES: dict[Good, list[Recipe]] = {
     good: _chain_for_good(good) for good in ENABLED_GOODS

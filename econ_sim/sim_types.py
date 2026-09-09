@@ -9,6 +9,8 @@ class Good(str, Enum):
     WOOD = "wood"
     TOOLS = "tools"
     SHELTER = "shelter"
+    FIBER = "fiber"
+    CLOTHES = "clothes"
 
 @dataclass(frozen=True)
 class Recipe:
@@ -17,7 +19,6 @@ class Recipe:
     outputs: dict[Good, int]
     domain: SkillDomain
     min_skill: float
-    tradeable: bool
 
     def can_afford(self, inventory: dict[Good, int]) -> bool:
         return all(inventory.get(g, 0) >= qty for g, qty in self.inputs.items())
@@ -28,6 +29,7 @@ class SkillDomain(Enum):
     CARPENTRY = "carpentry"      # craft tools
     FARMING = "farming"          # farming
     CONSTRUCTION = "construction" # build shelter
+    WEAVING = "weaving"          # fiber to weave clothes
 
 @dataclass
 class Order:
@@ -77,6 +79,8 @@ class AgentState:
     alive: bool = True
     has_shelter: bool = False
 
+    comfort_debt: float = 0.0
+
     recent_recipes: deque[str] = field(default_factory=deque)
 
     def inventory_of(self, good: Good) -> int:
@@ -102,7 +106,7 @@ class AgentArchetype:
     # should add risk_tolerance and time_preference
     name: str
     affinity_bias: dict[SkillDomain, float] = field(default_factory=lambda: {d: 1.0 for d in SkillDomain})
-    self_reliance_range: tuple[float, float] = (0.7, 1.6)   # defaults match current global range
+    self_reliance_range: tuple[float, float] = (0.7, 1.2)   # defaults match current global range
     goal_stickiness: float = 0.85                            # defaults match current global constant
     novice_penalty_exponent: float = 1.3
     profit_motivation: float = 0.8

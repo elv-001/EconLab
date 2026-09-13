@@ -11,7 +11,7 @@ from econ_sim.config import SimConfig
 from econ_sim.events import EventLog, EventType
 from econ_sim.market import Market
 from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
-from econ_sim.sim_types import Good, Recipe, TradeRecord
+from econ_sim.sim_types import Good, Recipe, TradeRecord, Order
 
 
 @dataclass
@@ -62,14 +62,6 @@ class Simulation:
         )
 
     def step(self) -> TickSnapshot:
-        agent1 = self.agents[1]
-        c1 = Counter()
-        if self.tick >= 180 and self.tick <= 220:
-            for agent in self.agents:
-                c1[agent.state.current_goal] += 1
-            #print(dict(c1))
-            
-
         self._phase_decisions()
         bids, asks = self._phase_offers()
         trades = self._phase_matching(bids, asks)
@@ -101,7 +93,46 @@ class Simulation:
         )
 
         self.tick += 1
-        if self.tick == 999:
+        if self.tick == 499:
+            craft_counts = sorted((a.state.recipe_counts.get("craft_tools", 0) for a in self.agents), reverse=True)
+            chop_counts = sorted((a.state.recipe_counts.get("chop_wood", 0) for a in self.agents), reverse=True)
+            print("craft_tools top 10:", craft_counts[:10])
+            print("chop_wood top 10:", chop_counts[:10])
+
+            total_tools = sum(
+                a.state.inventory_of(Good.TOOLS)
+                for a in self.agents
+            )
+
+            total_wood = sum(
+                a.state.inventory_of(Good.WOOD)
+                for a in self.agents
+            )
+
+            tool_producers = [
+                a for a in self.agents
+                if a.state.current_recipe
+                and a.state.current_recipe.name == "craft_tools"
+            ]
+
+            print(
+                "tool producer inventory:",
+                sum(a.state.inventory_of(Good.TOOLS) for a in tool_producers)
+)
+
+            print("total tools in inventory:", total_tools)
+            print("total wood:", total_wood)
+            print('total tool used:', int(self.total_tool_use/7))
+            print("total clothes in inventory", sum(
+                a.state.inventory_of(Good.CLOTHES)
+                for a in self.agents
+            ))
+            print("total fiber in inventory", sum(
+                            a.state.inventory_of(Good.FIBER)
+                            for a in self.agents
+                        ))
+        if self.tick == 499:
+            
             wealth_by_role = defaultdict(list)
             money_by_role = defaultdict(list)
     
@@ -134,30 +165,6 @@ class Simulation:
                     f"stdev={statistics.stdev(wealth) if len(wealth) > 1 else 0:>8.2f}"
                 )
 
-            total_tools = sum(
-                a.state.inventory_of(Good.TOOLS)
-                for a in self.agents
-            )
-
-            total_wood = sum(
-                a.state.inventory_of(Good.WOOD)
-                for a in self.agents
-            )
-
-            tool_producers = [
-                a for a in self.agents
-                if a.state.current_recipe
-                and a.state.current_recipe.name == "craft_tools"
-            ]
-
-            print(
-                "tool producer inventory:",
-                sum(a.state.inventory_of(Good.TOOLS) for a in tool_producers)
-)
-
-            print("total tools in inventory:", total_tools)
-            print("total wood:", total_wood)
-            print('total tool used:', int(self.total_tool_use/7))
             #print('total clothes produced:', self.total_clothes_produced) # type: ignore
 
             """
@@ -186,13 +193,13 @@ class Simulation:
                 key=lambda x: x[1],
                 reverse=True,
             ):
-                agent = next(a for a in self.agents if a.agent_id == buyer_id)
-
-                print(
-                    f"id={buyer_id} "
-                    f"specialization={agent.primary_activity()} "
-                    f"fiber_spent={spent:.2f}"
-                )
+                agent = next((a for a in self.agents if a.agent_id == buyer_id), None)
+                if agent:
+                    print(
+                        f"id={buyer_id} "
+                        f"specialization={agent.primary_activity()} "
+                        f"fiber_spent={spent:.2f}"
+                    )
             
             """"""
             print("\nSpecialization Economics")
@@ -222,8 +229,7 @@ class Simulation:
 
     def _phase_decisions(self):
         for agent in self.agents:
-            agent.choose_goal(self.tick)
-            agent.choose_production(self._last_prices, self.tick)
+            agent.plan(self.tick, self._last_prices)
 
     def _phase_production(self) -> dict[str, int]:
         totals: dict[str, int] = defaultdict(int)
@@ -237,7 +243,7 @@ class Simulation:
 
 
         for agent in self.agents:
-            recipe,f = agent.get_affordable_recipe(self._last_prices)
+            recipe,f = agent.confirm_current_recipe(self._last_prices)
             if recipe is not None:
                 if Good.TOOLS in recipe.inputs:
                     tool_uses += recipe.inputs[Good.TOOLS]
@@ -275,7 +281,7 @@ class Simulation:
         recipe_counts = Counter(recipe.name for agent, recipe in choices)
 
         #for recipe, count in recipe_counts.items():
-            #print(f"{recipe}: {count} agent(s)")
+        #    print(f"{recipe}: {count} agent(s)")
         #print("FIBER:", sum(agent.state.inventory[Good.FIBER] for agent in self.agents))
 
         for agent, recipe in choices:
@@ -340,6 +346,7 @@ class Simulation:
             f"asks={sum(o.quantity for o in asks if o.good == Good.TOOLS)}"
         )
         
+        """
         print(
             f"TOOLS BOOK: "
             f"bids={len(tool_bids)} "
@@ -350,7 +357,7 @@ class Simulation:
             f"min_ask={min((o.price for o in tool_asks), default=0):.2f}"
         )
         
-
+        """
         print(
         f"bids={len(bids)} "
         f"asks={len(asks)} "
@@ -362,11 +369,14 @@ class Simulation:
     """
         return bids, asks
 
-    def _phase_matching(self, bids: list, asks: list) -> list[TradeRecord]:
+    def _phase_matching(self, bids: list[Order], asks: list[Order]) -> list[TradeRecord]:
         result = self.market.clear(
             self.tick, bids, asks, use_midpoint=self.config.use_midpoint_pricing
         )
         agent_map = {a.agent_id: a for a in self.agents}
+
+        ask_by_id = {a.order_id: a for a in asks}
+        sold_by_ask_id: dict[int, int] = defaultdict(int)
 
         tool_total = 0
         for trade in result.trades:
@@ -387,23 +397,23 @@ class Simulation:
 
             buyer.state.money -= cost
             seller.state.money += cost
-            if trade.good == Good.FOOD:
-                buyer.add_food(qty, self.tick)
-                seller.remove_food(qty)
-            elif trade.good == Good.TOOLS:
-                buyer.add_tool(qty)
-                seller.remove_tool(qty)
-            else:
-                buyer.state.add_good(trade.good, qty)
-                seller.state.remove_good(trade.good, qty)
+
+            buyer.add_good(trade.good, qty, self.tick)
+            seller.remove_good(trade.good, qty)
+
+            # NEW: accumulate actual fulfilled qty against the seller's original ask.
+            # Need the ask's order_id on the trade — see note below if TradeRecord
+            # doesn't currently carry it.
+            sold_by_ask_id[trade.ask_order_id] += qty
+
             if trade.good == Good.FIBER:
                 self.total_fiber_trades[trade.buyer_id] = (
                     self.total_fiber_trades.get(trade.buyer_id, 0)
                     + trade.quantity * trade.price
                 )
 
-            buyer.record_trade(trade.seller_id, self.tick)
-            seller.record_trade(trade.buyer_id, self.tick)
+            if trade.good == Good.TOOLS:
+                tool_total += 1
 
             self._update_price(trade.good, trade.price)
 
@@ -419,8 +429,17 @@ class Simulation:
                 total_cost=round(cost, 2),
             )
 
+        for ask in asks:
+            seller = agent_map.get(ask.agent_id)
+            if seller is None:
+                continue
+            sold = sold_by_ask_id.get(ask.order_id, 0)
+            seller.record_sale(ask.good, offered=ask.quantity, sold=sold, price=ask.price)
+
         if self.config.check_invariants:
             self._check_invariants(result.trades)
+
+        print(f"TOOLS TRADED: {tool_total}")
 
         return result.trades
 
@@ -435,16 +454,8 @@ class Simulation:
 
     def _phase_housekeeping(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:
-            spoiled = agent.decay_food(self.tick)
-            if spoiled > 0:
-                self.event_log.record(
-                    self.tick,
-                    EventType.FOOD_DECAY,
-                    agent_id=agent.agent_id,
-                    quantity=spoiled,
-                    shelf_life=self.config.food_shelf_life_ticks,
-                )
-            consumed = agent.consume_food()
+            agent.decay_inventory(self.tick)
+            consumed = agent.consume_food(self.tick)
             if consumed > 0:
                 self.event_log.record(
                     self.tick,
@@ -464,13 +475,11 @@ class Simulation:
                 self.dead_agents.append(agent)
                 # on death
                 recent = list(getattr(agent.state, "recent_recipes", []))[-20:]
-                print(f"DEATH agent={agent.agent_id} tick={self.tick} recent_recipes={Counter(recent)}")
+                #print(f"DEATH agent={agent.agent_id} tick={self.tick} recent_recipes={Counter(recent)}")
 
             if self.config.clothing_enabled:
                 agent.consume_comfort()
             
-            agent.decay_memory(self.tick)
-
     def _check_invariants(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:
             for good in Good:

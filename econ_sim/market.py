@@ -65,6 +65,8 @@ class Market:
                         good=ask.good,
                         quantity=trade_qty,
                         price=trade_price,
+                        ask_order_id=ask.order_id,
+                        bid_order_id=bid.order_id,
                     )
                 )
 

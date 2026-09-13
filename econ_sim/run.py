@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from econ_sim.config import DEFAULT_CONFIG, SimConfig
+from econ_sim.sim_types import Good
 from econ_sim.metrics import SimReport
 from econ_sim.simulation import Simulation
 
@@ -127,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
 
     e = sum(1 for agent in sim.agents if agent.state.has_shelter)
     print(f"Has shelter: {e}")
+    f = sum(1 for agent in sim.agents if agent.state.inventory_of(Good.CLOTHES) > 0)
+    print(f"Has Clothes: {f}")
 
     # Single report construction – carries live agents/prices for archetype stats
     report = SimReport(

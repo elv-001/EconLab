@@ -12,6 +12,10 @@ class Good(str, Enum):
     FIBER = "fiber"
     CLOTHES = "clothes"
 
+class Goal(str, Enum):
+    PROFIT = "profit"
+    EXPLORE = "explore"
+
 @dataclass(frozen=True)
 class Recipe:
     name: str
@@ -24,7 +28,8 @@ class Recipe:
         return all(inventory.get(g, 0) >= qty for g, qty in self.inputs.items())
 
 class SkillDomain(Enum):
-    GATHERING = "gathering"      # forage, chop wood
+    GATHERING = "gathering"      # forage
+    HARVESTING = "harvesting"    # harvesting resources like fiber
     LUMBERJACK = "lumber"        # chop wood
     CARPENTRY = "carpentry"      # craft tools
     FARMING = "farming"          # farming
@@ -49,6 +54,8 @@ class TradeRecord:
     good: Good
     quantity: int
     price: float
+    ask_order_id: int
+    bid_order_id: int
 
 
 @dataclass
@@ -58,6 +65,19 @@ class CounterpartyMemory:
     trade_count: int = 0
     last_tick: int = 0
     trust: float = 0.5
+
+@dataclass
+class InventoryLot:
+    good: Good
+    quantity: int
+    created_tick: int
+
+    # None = does not naturally decay
+    shelf_life: int | None = None
+
+    # For durable goods such as tools.
+    # None = not a use-based good.
+    uses_remaining: int | None = None
 
 
 @dataclass
@@ -71,13 +91,15 @@ class AgentState:
     last_recipe: str | None = None
     recipe_counts: dict[str, int] = field(default_factory=dict)
     # FIFO food lots: (quantity, acquired_tick)
-    food_lots: list[tuple[int, int]] = field(default_factory=list)
-    tool_lots: list[int] = field(default_factory=list)
+    lots: list[InventoryLot] = field(default_factory=list)
     
-    current_goal: Good | None = None
+    current_goal: Good | Goal | None = None
     current_recipe: Recipe | None = None # current recipe being executed
     alive: bool = True
     has_shelter: bool = False
+
+    commitment_recipe: str | None = None
+    commitment_ticks_remaining: int = 0
 
     comfort_debt: float = 0.0
 
@@ -85,21 +107,8 @@ class AgentState:
 
     def inventory_of(self, good: Good) -> int:
         if good == Good.TOOLS:
-            return len(self.tool_lots)
+            return len([lot for lot in self.lots if lot.good == Good.TOOLS])
         return self.inventory.get(good, 0)
-
-    def add_good(self, good: Good, qty: int) -> None:
-        self.inventory[good] = self.inventory.get(good, 0) + qty
-
-    def remove_good(self, good: Good, qty: int) -> None:
-        if good == Good.FOOD:
-            raise ValueError("Use Agent food lot methods for food inventory")
-        current = self.inventory.get(good, 0)
-        if current < qty:
-            raise ValueError(
-                f"Agent {self.agent_id} insufficient {good.value}: have {current}, need {qty}"
-            )
-        self.inventory[good] = current - qty
 
 @dataclass
 class AgentArchetype:
@@ -110,6 +119,7 @@ class AgentArchetype:
     goal_stickiness: float = 0.85                            # defaults match current global constant
     novice_penalty_exponent: float = 1.3
     profit_motivation: float = 0.8
+    exploration_drive: float = 0.5 # 0 is no openness/pure profit, 1 is testing everything
     planning_depth_long: int = 3
 
 ARCHETYPES: dict[str, AgentArchetype] = {

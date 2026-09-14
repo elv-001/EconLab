@@ -346,7 +346,7 @@ class Simulation:
             f"asks={sum(o.quantity for o in asks if o.good == Good.TOOLS)}"
         )
         
-        """
+        
         print(
             f"TOOLS BOOK: "
             f"bids={len(tool_bids)} "
@@ -357,7 +357,7 @@ class Simulation:
             f"min_ask={min((o.price for o in tool_asks), default=0):.2f}"
         )
         
-        """
+        
         print(
         f"bids={len(bids)} "
         f"asks={len(asks)} "
@@ -439,7 +439,7 @@ class Simulation:
         if self.config.check_invariants:
             self._check_invariants(result.trades)
 
-        print(f"TOOLS TRADED: {tool_total}")
+        #print(f"TOOLS TRADED: {tool_total}")
 
         return result.trades
 

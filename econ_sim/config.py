@@ -44,7 +44,7 @@ class SimConfig:
     surplus_buffer: int = 1
 
     # Clothing
-    clothing_enabled: bool = False
+    clothing_enabled: bool = True
     target_clothes: int = 4
     comfort_consumption_per_tick: float = 0.8 # slower "wear rate" than food's per-tick eating
     comfort_urgency_weight: float = 1.3        # below food/tools, above pure luxury
@@ -67,7 +67,7 @@ class SimConfig:
     sell_value_weight: float = 0.4
 
     # SimConfig
-    tool_max_uses: int = 4    # a tool survives this many farm cycles
+    tool_max_uses: int = 3    # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
 
     # Bounded rationality: pick randomly among top-N scored recipes

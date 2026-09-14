@@ -117,45 +117,27 @@ class Agent:
 
     # Goal deals with hierarchy of needs. Immediate -> Long-Term
     def choose_goal(self, current_tick: int) -> Good | Goal:
-        # If agent is about to die, the goal is fixed on food
+        # Survival first
         if self._food_critical(current_tick):
             return Good.FOOD
 
         if self.config.shelter_required and not self.state.has_shelter:
             return Good.SHELTER
 
-        necessities = []
-        food_short = self._shortage(Good.FOOD)
-        if food_short > 0:
-            necessities.append((Good.FOOD, food_short * self.config.food_urgency_weight))
+        # Meaningful shortages (not just 1 unit)
+        if self._shortage(Good.FOOD) >= 3:
+            return Good.FOOD
 
-        if self.config.clothing_enabled:
-            clothes_short = self._shortage(Good.CLOTHES)
-            if clothes_short > 0:
-                necessities.append((Good.CLOTHES, clothes_short * self.config.comfort_urgency_weight))
+        if self.config.clothing_enabled and self._shortage(Good.CLOTHES) >= 2:
+            return Good.CLOTHES
 
-        if necessities:
-            necessities.sort(key=lambda x: x[1], reverse=True)
-            top_good, top_score = necessities[0]
-            # only act on it if urgency clears a minimum bar (avoids chasing trivial shortages)
-            #if top_score >= self.config.necessity_activation_threshold:
-            return top_good
-
-        #    Opportunity mode – personality influences but does not dictate
-        #    exploration_drive ∈ [0, 1]  (0 = pure profit seeker, 1 = pure explorer)
-        #    We keep a stochastic mix so even high-exploration agents sometimes
-        #    maximise profit and vice-versa.
-        explore_p = getattr(self.archetype, "exploration_drive", 0.3)
-        explore_p = max(0.05, min(0.85, explore_p))   # never 0 % or 100 %
-
+        # Otherwise opportunity
+        explore_p = max(0.05, min(0.7, getattr(self.archetype, "exploration_drive", 0.25)))
         if self.rng.random() < explore_p:
             return Goal.EXPLORE
-        else:
-            return Goal.PROFIT
+        return Goal.PROFIT
 
     def choose_production(self, goal: Goal | Good, market_prices: dict[Good, float], tick: int) -> Recipe | None:
-        """Chooses the current recipe to execute based on goals."""
-        # No active commitment: pick fresh, using the full scoring pass.
         candidates = self._recipes_toward_good(goal) if isinstance(goal, Good) else list(RECIPES)
         if not candidates:
             return None
@@ -165,18 +147,31 @@ class Agent:
             key=lambda x: x[0], reverse=True,
         )
 
-        if goal == Good.FOOD and self._food_critical(tick):
-            chosen = scored[0][1]
-            
-            if not self.can_afford_recipe(chosen) or chosen.outputs != Good.FOOD:
-                chosen = RECIPE_BY_NAME["forage"]
+        # Soft selection among top 2
+        top = scored[:min(2, len(scored))]
+        if self.rng.random() < 0.8 or len(top) == 1:
+            chosen = top[0][1]
         else:
-            top = scored[:min(2, len(scored))]
-            if self.rng.random() < 0.70 or len(top) == 1:
-                chosen = top[0][1]
+            weights = [max(s, 0.1) for s, _ in top]
+            chosen = self.rng.choices([r for _, r in top], weights=weights, k=1)[0]
+
+        # Very light safety net: only when food is critical AND the chosen recipe
+        # cannot produce food at all. Do NOT force forage just because inputs are missing.
+        if (goal == Good.FOOD
+                and self._food_critical(tick)
+                and Good.FOOD not in chosen.outputs):
+            # Prefer any food-producing recipe we can actually run
+            affordable_food = [
+                r for r in candidates
+                if Good.FOOD in r.outputs and self.can_afford_recipe(r)
+            ]
+            if affordable_food:
+                chosen = max(
+                    affordable_food,
+                    key=lambda r: self._score_recipe_for_goal(r, goal, market_prices)
+                )
             else:
-                weights = [max(s, 0.05) for s, _ in top]
-                chosen = self.rng.choices([r for _, r in top], weights=weights, k=1)[0]
+                chosen = RECIPE_BY_NAME["forage"]
 
         return chosen
 
@@ -411,15 +406,6 @@ class Agent:
                 if missing > 0:
                     needed[good] = max(needed.get(good, 0), max(1, missing))
 
-            # inside generate_orders, needed section – after the recipe.inputs loop
-            if any(recipe.inputs.values()):
-                for good, required in recipe.inputs.items():
-                    if good not in TRADEABLE_GOODS:
-                        continue
-                    missing = max(0, required - self.state.inventory_of(good))
-                    if missing > 0:
-                        needed[good] = max(needed.get(good, 0), missing)
-
         # Ignore and Good != GOOD.FIBER
         # if the problem is that they need fiber, then they buy it AND gather it
         # what do i do
@@ -483,96 +469,79 @@ class Agent:
         #)
 
     def confirm_current_recipe(self, market_prices: dict[Good, float]) -> tuple[Recipe | None, bool]:
-        """Confirms current recipe can be executed. Finds alternatives if it is invalid."""
         planned = self.state.current_recipe
-
-        # If on-track
         if planned is not None and self.can_afford_recipe(planned):
             return planned, True
-        # if planned recipe is impossible, find fallbacks that achieve same output item
+
         goal = self.state.current_goal
 
+        # Prefer affordable alternatives that still help the goal
         if isinstance(goal, Good):
-            alternatives = [
-                r for r in self._recipes_toward_good(goal)
-                if r is not planned and self.can_afford_recipe(r)
-            ]
-            if alternatives:
-                chain_needs = self._chain_input_needs(goal)
-                # Pick the highest-scoring *affordable* alternative
-                best = max(
-                    alternatives,
-                    key=lambda r: self._score_recipe_for_goal(r, goal, market_prices),
-                )
-
+            alts = [r for r in self._recipes_toward_good(goal)
+                    if r is not planned and self.can_afford_recipe(r)]
+            if alts:
+                best = max(alts, key=lambda r: self._score_recipe_for_goal(r, goal, market_prices))
                 return best, False
-        # 3. Last resort: any affordable zero-input recipe (forage / gather_fiber / chop_wood)
-        zero_input = [
-            r for r in RECIPES
-            if not r.inputs and self.can_afford_recipe(r)
-        ]
-        if zero_input:
-            best = max(
-                zero_input,
-                key=lambda r: self._score_recipe_for_goal(r, goal, market_prices),
-            )
+
+        # Last resort: any zero-input
+        zero = [r for r in RECIPES if not r.inputs and self.can_afford_recipe(r)]
+        if zero:
+            best = max(zero, key=lambda r: self._score_recipe_for_goal(r, goal, market_prices))
             return best, False
 
         return None, False
         
-    def _score_recipe_for_goal(self, recipe: Recipe, 
-                           goal: Good | Goal | None, 
+    def _score_recipe_for_goal(self, recipe: Recipe,
+                           goal: Good | Goal | None,
                            market_prices: dict[Good, float]) -> float:
         prices = market_prices or self.config.base_prices()
+        productivity = self._productivity(recipe)
         score = 0.0
-        productivity = self._productivity(recipe)  # already includes skill × affinity
 
-        # Necessity pressure (unchanged)
+        # --- Goal contribution ---
         if isinstance(goal, Good):
-            depth = self._chain_depth_of(recipe, goal, self.archetype.planning_depth_long)
-            pressure = self._shortage(goal) * self._urgency_weight(goal)
-            is_intermediate = any(g != goal for g in recipe.outputs)
-            if is_intermediate:
-                for out_good in recipe.outputs:
-                    if self.state.inventory_of(out_good) >= 6:
-                        pressure *= 0.1
-            score += pressure * (self.config.chain_discount ** depth)
+            if goal in recipe.outputs:
+                # Direct producer of the needed good
+                score += 12.0 + self._shortage(goal) * self._urgency_weight(goal)
+            else:
+                # Intermediate that feeds the goal chain
+                needed = self._chain_input_needs(goal)
+                if any(g in recipe.outputs for g in needed):
+                    score += 4.0
 
-        # Economic term – simplified and productivity-weighted
+        # --- Economic term (net expected value) ---
         revenue = 0.0
-        cost = 0.0
         for good, base_qty in recipe.outputs.items():
             if good not in TRADEABLE_GOODS and good != goal:
                 continue
-            qty = max(1, int(round(base_qty * productivity))) if base_qty > 0 else 0
-            sell_rate = self.expected_sell_rate.get(good, 1.0)
-            unit_price = prices.get(good, self.config.base_prices().get(good, 1.0))
-            revenue += qty * unit_price * sell_rate
+            qty = max(0, int(round(base_qty * productivity)))
+            if qty == 0:
+                continue
+            sell_rate = self.expected_sell_rate.get(good, 0.75)
+            unit = prices.get(good, self.config.base_prices().get(good, 1.0))
+            revenue += qty * unit * sell_rate
 
+        cost = 0.0
         for good, qty in recipe.inputs.items():
-            have = self.state.inventory_of(good)
-            missing = max(0, qty - have)
+            missing = max(0, qty - self.state.inventory_of(good))
             unit = prices.get(good, self.config.base_prices().get(good, 1.0))
             if good == Good.TOOLS:
-                unit = unit / self.config.tool_max_uses
-                # Treat tools as partially amortised; do not penalise a full missing tool as heavily
-                missing = max(0, math.ceil(missing / 2))
+                unit /= self.config.tool_max_uses
             cost += missing * unit
 
-        # Key change: multiply economic surplus by productivity so high-skill agents see a larger edge
-        # raise power for comparative advantage to be amplified
-        economic = (revenue - cost) * (productivity ** 1.6) * self.archetype.profit_motivation
-        score += economic
+        net = (revenue - cost) * (productivity ** 1.5) * getattr(self.archetype, "profit_motivation", 1.0)
+        score += net
 
-        # Explore bonus (keep, already organic)
+        # Small penalty for pure gathering when we are not in survival mode
+        # (stops forage from always winning on pure economics)
+        if not recipe.inputs and goal not in (Good.FOOD, Good.SHELTER):
+            score -= 1.5
+
+        # Exploration
         if goal == Goal.EXPLORE:
             affinity = self.skill_affinities.get(recipe.domain, 1.0)
-            novelty = 1.0 - min(1.0, self.state.recipe_counts.get(recipe.name, 0) / 15.0)
-            explore_bonus = (
-                1.8 * affinity * novelty
-                * getattr(self.archetype, "exploration_drive", 0.3)
-            )
-            score += explore_bonus
+            novelty = 1.0 - min(1.0, self.state.recipe_counts.get(recipe.name, 0) / 12.0)
+            score += 2.0 * affinity * novelty * getattr(self.archetype, "exploration_drive", 0.3)
 
         return score
 
@@ -649,7 +618,7 @@ class Agent:
         progress = max(0.0, (current - 1.0) / (personal_cap - 1.0))
         gain = (
             self.config.skill_gain_per_use
-            * (1.0 - progress)
+            * (1.0 - progress) ** 2
             * (talent ** 1.5)                           # milder than **3
         )
 
@@ -801,7 +770,12 @@ class Agent:
 
         # Soft discount that grows with how much extra we hold
         discount = min(0.55, self.config.surplus_discount * (surplus / max(1, surplus + 3)))
-        return max(0.35 * base, anchor * (1.0 - discount))
+
+        # Pure quantity pressure (no age needed)
+        inventory_pressure = min(0.55, 0.04 * surplus)
+        discount = min(0.65, discount + inventory_pressure)
+
+        return max(0.3 * base, anchor * (1.0 - discount))
 
     def _surplus(self, good: Good) -> int:
         inventory = self.state.inventory_of(good)

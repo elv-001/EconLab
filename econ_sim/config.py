@@ -174,7 +174,7 @@ ALL_RECIPES: list[Recipe] = [
            inputs={Good.FIBER: 2, Good.TOOLS: 1}, 
            outputs={Good.CLOTHES: 3},
            domain=SkillDomain.WEAVING, 
-           min_skill=1.6, 
+           min_skill=1.3, 
     ),
 ]
 

@@ -461,6 +461,8 @@ class Agent:
             + alpha * realized_rate
         )
         self.expected_sell_rate[good] = max(0.25, new_rate)
+        #print(self.expected_sell_rate.get(Good.TOOLS), self.expected_sell_rate.get(Good.WOOD))
+
         #print(self.agent_id, good.name, self.expected_sell_rate[good])
 
         #self.expected_prices[good] = (
@@ -535,7 +537,7 @@ class Agent:
         # Small penalty for pure gathering when we are not in survival mode
         # (stops forage from always winning on pure economics)
         if not recipe.inputs and goal not in (Good.FOOD, Good.SHELTER):
-            score -= 1.5
+            score -= 4
 
         # Exploration
         if goal == Goal.EXPLORE:
@@ -635,7 +637,7 @@ class Agent:
                 # Keep a usable floor for the critical chains
                 floor = 1.0
             else:
-                floor = 0.0
+                floor = 0.3
 
             last_used_tick = self._last_used_by_domain(domain)
             if last_used_tick > self.config.skill_decay_grace_period:
@@ -674,7 +676,7 @@ class Agent:
         raw = skill_factor * affinity_factor
 
         if skill < recipe.min_skill:
-            proficiency = skill / recipe.min_skill
+            proficiency = max(0.25, skill / recipe.min_skill)
             raw *= proficiency ** self.archetype.novice_penalty_exponent
 
         productivity_loss = 0
@@ -690,8 +692,10 @@ class Agent:
         return min(cap, raw)
 
     def _gathering_penalty(self, recipe: Recipe) -> float:
-        uses = self.state.recipe_counts.get(recipe.name, 0)
-        return 1 / (1 + 0.001 * uses)
+        if recipe.domain == SkillDomain.GATHERING:
+            uses = self.state.recipe_counts.get(recipe.name, 0)
+            return 1 / (1 + 0.001 * uses)
+        return 1
 
     def _recipes_toward_good(self, goal: Good) -> list[Recipe]:
             return GOAL_CHAIN_RECIPES[goal]
@@ -761,7 +765,7 @@ class Agent:
         base = self.config.base_prices().get(good, 1.0)
         market_ref = (market_prices or {}).get(good, base)
         # Ratio of market influence to fundamental value
-        anchor = 0.8 * base + 0.2 * market_ref
+        anchor = 0.75 * base + 0.25 * market_ref
 
         surplus = self._surplus(good)
         if surplus <= 0:
@@ -769,13 +773,13 @@ class Agent:
             return anchor
 
         # Soft discount that grows with how much extra we hold
-        discount = min(0.55, self.config.surplus_discount * (surplus / max(1, surplus + 3)))
+        discount = min(0.65, self.config.surplus_discount * (surplus / max(1, surplus + 2)))
 
         # Pure quantity pressure (no age needed)
-        inventory_pressure = min(0.55, 0.04 * surplus)
-        discount = min(0.65, discount + inventory_pressure)
+        inventory_pressure = min(0.5, 0.05 * surplus)
+        discount = min(0.7, discount + inventory_pressure)
 
-        return max(0.3 * base, anchor * (1.0 - discount))
+        return max(0.25 * base, anchor * (1.0 - discount))
 
     def _surplus(self, good: Good) -> int:
         inventory = self.state.inventory_of(good)

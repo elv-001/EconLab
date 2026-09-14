@@ -16,7 +16,7 @@ class Goal(str, Enum):
     PROFIT = "profit"
     EXPLORE = "explore"
 
-@dataclass(frozen=True)
+@dataclass #(frozen=True)
 class Recipe:
     name: str
     inputs: dict[Good, int]

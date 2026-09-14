@@ -93,11 +93,11 @@ class Simulation:
         )
 
         self.tick += 1
-        if self.tick == 499:
+        if self.tick == 999:
             craft_counts = sorted((a.state.recipe_counts.get("craft_tools", 0) for a in self.agents), reverse=True)
             chop_counts = sorted((a.state.recipe_counts.get("chop_wood", 0) for a in self.agents), reverse=True)
-            print("craft_tools top 10:", craft_counts[:10])
-            print("chop_wood top 10:", chop_counts[:10])
+            #print("craft_tools top 10:", craft_counts[:10])
+            #print("chop_wood top 10:", chop_counts[:10])
 
             total_tools = sum(
                 a.state.inventory_of(Good.TOOLS)
@@ -131,7 +131,7 @@ class Simulation:
                             a.state.inventory_of(Good.FIBER)
                             for a in self.agents
                         ))
-        if self.tick == 499:
+        if self.tick == 999:
             
             wealth_by_role = defaultdict(list)
             money_by_role = defaultdict(list)
@@ -185,23 +185,8 @@ class Simulation:
                     f"revenue={revenue[agent.agent_id]:>9.2f}"
                 )
             """
-
-            print("\nFiber Buyers")
-
-            for buyer_id, spent in sorted(
-                self.total_fiber_trades.items(),
-                key=lambda x: x[1],
-                reverse=True,
-            ):
-                agent = next((a for a in self.agents if a.agent_id == buyer_id), None)
-                if agent:
-                    print(
-                        f"id={buyer_id} "
-                        f"specialization={agent.primary_activity()} "
-                        f"fiber_spent={spent:.2f}"
-                    )
             
-            """"""
+            """
             print("\nSpecialization Economics")
             for role, agents in wealth_by_role.items():
                 print(f"\n{role}")
@@ -224,7 +209,7 @@ class Simulation:
                             f"money={agent.state.money:.2f} "
                             f"inventory={agent.state.inventory}"
                          )
-                """"""
+                """
         return snapshot
 
     def _phase_decisions(self):

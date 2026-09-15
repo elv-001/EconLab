@@ -528,6 +528,10 @@ SWEEP_PRESETS: dict[str, dict[str, Any]] = {
         param_name="comfort_urgency_weight",
         values=[0.8, 1.3, 1.8, 2.3],
     ),
+    "comfort_productivity_loss": dict(
+        param_name="comfort_productivity_loss",
+        values=[0.1, 0.12, 0.14, 0.16, 0.18, 0.2]
+    ),
 }
 
 

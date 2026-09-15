@@ -39,16 +39,16 @@ class SimConfig:
     shelter_productivity_loss = 0.25  # how much producitivity is lost without shelter
 
     # Inventory targets (agents try to maintain these levels)
-    target_food: int = 10
+    target_food: int = 8
     target_shelter: int = 1
     surplus_buffer: int = 1
 
     # Clothing
     clothing_enabled: bool = True
     target_clothes: int = 4
-    comfort_consumption_per_tick: float = 0.8 # slower "wear rate" than food's per-tick eating
-    comfort_urgency_weight: float = 1.3        # below food/tools, above pure luxury
-    comfort_productivity_loss: float = 0.1
+    comfort_consumption_per_tick: float = 0.85 # slower "wear rate" than food's per-tick eating
+    comfort_urgency_weight: float = 1.6        # below food/tools, above pure luxury
+    comfort_productivity_loss: float = 0.15
 
     # Base reservation prices (used when no market history)
     base_price_food: float = 3.0
@@ -67,7 +67,7 @@ class SimConfig:
     sell_value_weight: float = 0.4
 
     # SimConfig
-    tool_max_uses: int = 3    # a tool survives this many farm cycles
+    tool_max_uses: int = 5    # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
 
     # Bounded rationality: pick randomly among top-N scored recipes
@@ -101,8 +101,8 @@ class SimConfig:
     affinity_effect: float = 0.4
 
     # Price discovery smoothing (EMA alpha; clamp as fraction of base price)
-    price_ema_alpha: float = 0.15
-    price_clamp_min_factor: float = 0.4
+    price_ema_alpha: float = 0.3
+    price_clamp_min_factor: float = 0.1
     price_clamp_max_factor: float = 10
 
     # Planning depth

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import random, math
-from typing import TYPE_CHECKING
 from collections import deque, Counter
 
 from econ_sim.config import (
     GOAL_CHAIN_RECIPES, RECIPES, SimConfig, RECIPE_BY_NAME, ENABLED_GOODS,
-    TRADEABLE_GOODS, ARCHETYPE_MIX, CAPITAL_GOODS
+    TRADEABLE_GOODS, ARCHETYPE_MIX
 )
 
 from econ_sim.sim_types import (
-    AgentState, CounterpartyMemory, Good, Order, Recipe, SkillDomain, 
+    AgentState, Good, Order, Recipe, SkillDomain, 
     AgentArchetype, ARCHETYPES, Goal, InventoryLot
 )
 
@@ -101,6 +100,9 @@ class Agent:
     def plan(self, tick: int, market_prices: dict[Good, float]) -> None:
         goal = self.choose_goal(tick)
         self.state.current_goal = goal
+        for good in ENABLED_GOODS:
+            self._update_unmet_streak(good)
+
         recipe = self.choose_production(goal, market_prices, tick)
         self.state.current_recipe = recipe
 
@@ -128,7 +130,7 @@ class Agent:
         if self._shortage(Good.FOOD) >= 3:
             return Good.FOOD
 
-        if self.config.clothing_enabled and self._shortage(Good.CLOTHES) >= 2:
+        if self.config.clothing_enabled and self._shortage(Good.CLOTHES) >= 1:
             return Good.CLOTHES
 
         # Otherwise opportunity
@@ -138,7 +140,14 @@ class Agent:
         return Goal.PROFIT
 
     def choose_production(self, goal: Goal | Good, market_prices: dict[Good, float], tick: int) -> Recipe | None:
-        candidates = self._recipes_toward_good(goal) if isinstance(goal, Good) else list(RECIPES)
+        if isinstance(goal, Good) and goal not in TRADEABLE_GOODS:
+            candidates = self._recipes_toward_good(goal)
+        else:
+            # Tradeable necessity (food, clothes, wood, tools, fiber): buying is
+            # always a live alternative via generate_orders' bid, so don't force
+            # self-production — let the agent's specialty compete honestly
+            # against the direct producer/chain recipes for this goal.
+            candidates = list(RECIPES)
         if not candidates:
             return None
 
@@ -174,6 +183,15 @@ class Agent:
                 chosen = RECIPE_BY_NAME["forage"]
 
         return chosen
+
+    def _update_unmet_streak(self, good: Good) -> int:
+        shortage = self._shortage(good)
+        if shortage > 0:
+            streak = self.state.unmet_shortage_streak.get(good, 0) + 1
+        else:
+            streak = 0
+        self.state.unmet_shortage_streak[good] = streak
+        return streak
 
     # ------------------------------------------------------------------
     # Inventory lots
@@ -404,15 +422,16 @@ class Agent:
                     continue
                 missing = max(0, required - self.state.inventory_of(good))
                 if missing > 0:
-                    needed[good] = max(needed.get(good, 0), max(1, missing))
+                    buy_fraction = 1.0 - 0.5 * self.state.self_reliance
+                    wanted = max(1, math.ceil(missing * buy_fraction))
+                    needed[good] = max(needed.get(good, 0), wanted)
 
-        # Ignore and Good != GOOD.FIBER
-        # if the problem is that they need fiber, then they buy it AND gather it
-        # what do i do
         if isinstance(goal, Good) and goal in TRADEABLE_GOODS:
             short = self._shortage(goal)
             if short > 0:
-                needed[goal] = max(needed.get(goal, 0), short)
+                buy_fraction = 1.0 - 0.5 * self.state.self_reliance
+                wanted = max(1, math.ceil(short * buy_fraction))
+                needed[goal] = max(needed.get(goal, 0), wanted)
 
         for good, shortage in needed.items():
             if shortage < self.config.min_order_quantity:
@@ -477,7 +496,7 @@ class Agent:
 
         goal = self.state.current_goal
 
-        # Prefer affordable alternatives that still help the goal
+        # Prefer any affordable alternative that still helps the goal
         if isinstance(goal, Good):
             alts = [r for r in self._recipes_toward_good(goal)
                     if r is not planned and self.can_afford_recipe(r)]
@@ -485,12 +504,9 @@ class Agent:
                 best = max(alts, key=lambda r: self._score_recipe_for_goal(r, goal, market_prices))
                 return best, False
 
-        # Last resort: any zero-input
-        zero = [r for r in RECIPES if not r.inputs and self.can_afford_recipe(r)]
-        if zero:
-            best = max(zero, key=lambda r: self._score_recipe_for_goal(r, goal, market_prices))
-            return best, False
-
+        # NEW: do NOT fall back to zero-input.  
+        # If we cannot afford anything useful, return None (agent produces nothing this tick).
+        # This stops the automatic “I can’t craft → I forage” loop.
         return None, False
         
     def _score_recipe_for_goal(self, recipe: Recipe,
@@ -502,16 +518,16 @@ class Agent:
 
         # --- Goal contribution ---
         if isinstance(goal, Good):
+            streak = self.state.unmet_shortage_streak.get(goal, 0)
+            persistence = 1.0 + min(2.5, streak / 12.0)
             if goal in recipe.outputs:
-                # Direct producer of the needed good
-                score += 12.0 + self._shortage(goal) * self._urgency_weight(goal)
+                score += (10.0 + self._shortage(goal) * self._urgency_weight(goal)) * persistence
             else:
-                # Intermediate that feeds the goal chain
                 needed = self._chain_input_needs(goal)
                 if any(g in recipe.outputs for g in needed):
-                    score += 4.0
+                    score += 3.5 * persistence
 
-        # --- Economic term (net expected value) ---
+        # --- Economic term ---
         revenue = 0.0
         for good, base_qty in recipe.outputs.items():
             if good not in TRADEABLE_GOODS and good != goal:
@@ -519,13 +535,16 @@ class Agent:
             qty = max(0, int(round(base_qty * productivity)))
             if qty == 0:
                 continue
-            sell_rate = self.expected_sell_rate.get(good, 0.75)
+            sell_rate = self.expected_sell_rate.get(good, 0.7)
             unit = prices.get(good, self.config.base_prices().get(good, 1.0))
             revenue += qty * unit * sell_rate
 
         cost = 0.0
+        missing_any = False
         for good, qty in recipe.inputs.items():
             missing = max(0, qty - self.state.inventory_of(good))
+            if missing > 0:
+                missing_any = True
             unit = prices.get(good, self.config.base_prices().get(good, 1.0))
             if good == Good.TOOLS:
                 unit /= self.config.tool_max_uses
@@ -534,10 +553,9 @@ class Agent:
         net = (revenue - cost) * (productivity ** 1.5) * getattr(self.archetype, "profit_motivation", 1.0)
         score += net
 
-        # Small penalty for pure gathering when we are not in survival mode
-        # (stops forage from always winning on pure economics)
-        if not recipe.inputs and goal not in (Good.FOOD, Good.SHELTER):
-            score -= 4
+        # Big bonus if the agent can actually run the recipe right now
+        if not missing_any and recipe.inputs:
+            score += 6.0
 
         # Exploration
         if goal == Goal.EXPLORE:
@@ -640,7 +658,8 @@ class Agent:
                 floor = 0.3
 
             last_used_tick = self._last_used_by_domain(domain)
-            if last_used_tick > self.config.skill_decay_grace_period:
+            grace = self.config.skill_decay_grace_period * (1.0 + self.archetype.time_preference)
+            if last_used_tick > grace:
                 self.state.skills[domain] = max(floor, skill - self.config.skill_decay_per_tick)
 
     def _last_used_by_domain(self, domain: SkillDomain) -> int:
@@ -704,7 +723,7 @@ class Agent:
     def _shortage(self, good: Good) -> int:
         if good == Good.FOOD:
             target = self.config.targets().get(Good.FOOD, 6)
-            buffer = self.config.surplus_buffer
+            buffer = self.config.surplus_buffer * (1 + self.archetype.time_preference)
             inv = self.state.inventory_of(Good.FOOD)
             if inv >= target - buffer:   # already comfortable, don't re-trigger
                 return 0
@@ -715,7 +734,7 @@ class Agent:
 
         if good == Good.CLOTHES:
             target = self.config.targets().get(Good.CLOTHES, 3)
-            return max(0, target - self.state.inventory_of(Good.CLOTHES))
+            return max(0, (target + 1) - self.state.inventory_of(Good.CLOTHES))
         return 0
 
     def _reservation_bid_price(self, good: Good, market_prices: dict[Good, float]) -> float:
@@ -752,7 +771,9 @@ class Agent:
 
         # Don't dump all money into one trade
         if self.state.money > 0:
-            price = min(price, self.state.money * 0.7)
+            # Risk-tolerant agents will commit a bigger share of their cash to one trade.
+            spend_cap = 0.5 + 0.3 * self.archetype.risk_tolerance
+            price = min(price, self.state.money * spend_cap)
 
         return price
         
@@ -787,7 +808,8 @@ class Agent:
             return 0
         if good == Good.FOOD:
             target = self.config.targets().get(Good.FOOD, 6)
-            return max(0, inventory - (target + self.config.surplus_buffer))
+            buffer = self.config.surplus_buffer * (1.0 + self.archetype.time_preference)
+            return max(0, inventory - int((target + buffer)))
 
         reserve = 0
         recipe = self.state.current_recipe
@@ -859,7 +881,8 @@ class Agent:
         )
         effective_food = total - spoiling_now
         # Allow a slightly larger buffer before forcing pure survival
-        return effective_food <= consumption  # dropped the + surplus_buffer
+        safety_margin = self.config.surplus_buffer * (1.0 - self.archetype.risk_tolerance)
+        return effective_food <= consumption + safety_margin  # dropped the + surplus_buffer
 
     def consume_food(self, tick) -> int:
         """Eat food oldest-first. Returns amount consumed."""
@@ -872,7 +895,7 @@ class Agent:
              #         f"goal_last={self.state.current_goal}")
             
             self.state.alive = False
-            print(f"DEATH REASON: {self.state.current_goal}, recipe: {self.state.current_recipe}")
+            #print(f"DEATH REASON: {self.state.current_goal}, recipe: {self.state.current_recipe}")
             return 0
 
         self.use_good(Good.FOOD, needed)

@@ -96,6 +96,8 @@ class Simulation:
         if self.tick == 999:
             craft_counts = sorted((a.state.recipe_counts.get("craft_tools", 0) for a in self.agents), reverse=True)
             chop_counts = sorted((a.state.recipe_counts.get("chop_wood", 0) for a in self.agents), reverse=True)
+            fiber_counts = sorted((a.state.recipe_counts.get("gather_fiber", 0) for a in self.agents), reverse=True)
+            #print("fiber_counts top 10:", fiber_counts[:10])
             #print("craft_tools top 10:", craft_counts[:10])
             #print("chop_wood top 10:", chop_counts[:10])
 

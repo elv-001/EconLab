@@ -16,6 +16,19 @@ class Goal(str, Enum):
     PROFIT = "profit"
     EXPLORE = "explore"
 
+class ActionType(str, Enum):
+    PRODUCE = "produce"
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
+
+@dataclass
+class Action:
+    action_type: ActionType
+    good: Good | None = None
+    recipe: Recipe | None = None
+    quantity: int = 0
+
 @dataclass #(frozen=True)
 class Recipe:
     name: str
@@ -96,6 +109,9 @@ class AgentState:
     current_recipe: Recipe | None = None # current recipe being executed
     alive: bool = True
     has_shelter: bool = False
+
+    current_production_action: Action | None = None
+    current_trade_actions: list[Action] = field(default_factory=list)
 
     comfort_debt: float = 0.0
 

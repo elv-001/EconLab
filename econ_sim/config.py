@@ -80,8 +80,8 @@ class SimConfig:
     skill_gain_decay_exponent: float = 3
     skill_decay_per_tick: float = 0.01
 
-    skill_decay_grace_period: int = 10
-
+    skill_decay_grace_period: int = 15
+    
     # Trade memory
     memory_decay_ticks: int = 50
     trust_gain_per_trade: float = 0.05
@@ -101,7 +101,7 @@ class SimConfig:
     affinity_effect: float = 0.4
 
     # Price discovery smoothing (EMA alpha; clamp as fraction of base price)
-    price_ema_alpha: float = 0.3
+    price_ema_alpha: float = 0.1
     price_clamp_min_factor: float = 0.1
     price_clamp_max_factor: float = 10
 

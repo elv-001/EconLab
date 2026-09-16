@@ -101,6 +101,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
     for a in agents:
         role = a.primary_activity() or "none"
         spec_counts[role] = spec_counts.get(role, 0) + 1
+    print(spec_counts)
 
     def share(name: str) -> float:
         return spec_counts.get(name, 0) / max(1, n_alive)

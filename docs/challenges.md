@@ -51,3 +51,10 @@ There also aren't any mass deaths (85%+ survival rate). It is a stable economy.
 Some issues still remain. Food per capita is 70+, so there's basically no scarcity and need for trade anymore after tick 50. Foraging is still too efficient. I also want to run actual experiments by mixing up agent decisioning (depending on personality), or enabling/disabling trade to see if it makes things more efficient.
 
 But this is a starting point.
+
+a precondition to coding this 'emerging specialisation' is that agents must understand a hierarchy fo goals
+aka food is more important than clothes. the question is how I code this in, and how does a difference in goal lead to difference in choices
+
+i sohuld be hard coding the structure of goals into the recipe, but how the agents behave should not be due to direct explicit manipulation
+
+pricing algo defies laws of demand & supply. bids > asks should cause demand to go up, but price of clothes collapsed. thus no incentivise production

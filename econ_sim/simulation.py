@@ -230,6 +230,8 @@ class Simulation:
 
 
         for agent in self.agents:
+            agent.execute_action(self.tick, self._last_prices)
+            """
             recipe,f = agent.confirm_current_recipe(self._last_prices)
             if recipe is not None:
                 if Good.TOOLS in recipe.inputs:
@@ -253,10 +255,12 @@ class Simulation:
             #)
             if not f:
                 e+=1
+                
             
 
             if recipe is not None:
                 choices.append((agent, recipe))
+        """
         #print(f"Tools produced this tick: {tool_produced}")
         #print(f"Total Tools produced: {self.total_tool_produce}")
         #print(f"Clothes produced this tick: {clothes_produced}")
@@ -322,10 +326,23 @@ class Simulation:
                         quantity=order.quantity,
                         price=round(order.price, 2),
                     )
-
+        
         tool_bids = [o for o in bids if o.good == Good.TOOLS]
         tool_asks = [o for o in asks if o.good == Good.TOOLS]
+
+        clothes_bids = [o for o in bids if o.good == Good.CLOTHES]
+        clothes_asks = [o for o in asks if o.good == Good.CLOTHES]
         """
+        print(
+                    f"CLOTHES BOOK: "
+                    f"bids={len(clothes_bids)} "
+                    f"bid_qty={sum(o.quantity for o in clothes_bids)} "
+                    f"asks={len(clothes_asks)} "
+                    f"ask_qty={sum(o.quantity for o in clothes_asks)} "
+                    f"max_bid={max((o.price for o in clothes_bids), default=0):.2f} "
+                    f"min_ask={min((o.price for o in clothes_asks), default=0):.2f}"
+                )
+        
         print(
             f"WOOD  bids={sum(o.quantity for o in bids if o.good == Good.WOOD)} "
             f"asks={sum(o.quantity for o in asks if o.good == Good.WOOD)} | "
@@ -352,8 +369,8 @@ class Simulation:
         f"food_asks={sum(o.quantity for o in asks if o.good == Good.FOOD)} "
         f"tool_bids={sum(o.quantity for o in bids if o.good == Good.TOOLS)} "
         f"tool_asks={sum(o.quantity for o in asks if o.good == Good.TOOLS)}"
-    )
-    """
+        )
+        """
         return bids, asks
 
     def _phase_matching(self, bids: list[Order], asks: list[Order]) -> list[TradeRecord]:
@@ -362,7 +379,6 @@ class Simulation:
         )
         agent_map = {a.agent_id: a for a in self.agents}
 
-        ask_by_id = {a.order_id: a for a in asks}
         sold_by_ask_id: dict[int, int] = defaultdict(int)
 
         tool_total = 0
@@ -377,9 +393,8 @@ class Simulation:
             affordable_qty = int( buyer.state.money / max(0.01, trade.price) )
             qty = min(trade.quantity, affordable_qty)
 
-            if qty <= 0: 
+            if qty <= 0:
                 continue 
-
             cost = trade.price * qty
 
             buyer.state.money -= cost
@@ -402,8 +417,6 @@ class Simulation:
             if trade.good == Good.TOOLS:
                 tool_total += 1
 
-            self._update_price(trade.good, trade.price)
-
             self.event_log.record(
                 self.tick,
                 EventType.TRADE,
@@ -423,6 +436,14 @@ class Simulation:
             sold = sold_by_ask_id.get(ask.order_id, 0)
             seller.record_sale(ask.good, offered=ask.quantity, sold=sold, price=ask.price)
 
+        goods = {o.good for o in bids}
+        for good in goods:
+            self._update_price_from_book(
+                good, 
+                [o for o in bids if o.good == good],
+                [o for o in asks if o.good == good]
+            )
+
         if self.config.check_invariants:
             self._check_invariants(result.trades)
 
@@ -430,14 +451,30 @@ class Simulation:
 
         return result.trades
 
-    def _update_price(self, good: Good, trade_price: float) -> None:
+    def _update_price_from_book(self, good: Good, bids: list[Order], asks: list[Order]) -> None:
+        bid_qty = sum(o.quantity for o in bids if o.good == good)
+        ask_qty = sum(o.quantity for o in asks if o.good == good)
+
+        if bid_qty + ask_qty == 0:
+            return
+
+        # Imbalance ∈ [-1, +1], positive = excess demand
+        imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty)
+
         base = self.config.base_prices()[good]
+        prev = self._last_prices.get(good, base)
+
+        # How strongly imbalance moves the price
+        adjustment = 1.0 + 0.15 * imbalance          # tune 0.10–0.25
+        target = prev * adjustment
+
+        # Still clamp
         lo = base * self.config.price_clamp_min_factor
         hi = base * self.config.price_clamp_max_factor
-        clamped = max(lo, min(hi, trade_price))
-        prev = self._last_prices.get(good, base)
+        target = max(lo, min(hi, target))
+
         alpha = self.config.price_ema_alpha
-        self._last_prices[good] = (1 - alpha) * prev + alpha * clamped
+        self._last_prices[good] = (1 - alpha) * prev + alpha * target
 
     def _phase_housekeeping(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:

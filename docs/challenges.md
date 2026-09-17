@@ -58,3 +58,10 @@ aka food is more important than clothes. the question is how I code this in, and
 i sohuld be hard coding the structure of goals into the recipe, but how the agents behave should not be due to direct explicit manipulation
 
 pricing algo defies laws of demand & supply. bids > asks should cause demand to go up, but price of clothes collapsed. thus no incentivise production
+after limiting foraging with yield, it's now farming dominant vs clothing chain dominant
+this was because tool max use was too small, so the limited num of tools locked agents into one given path
+it seems like when weaving and farming compete for tools the price skyrockets so they cant afford
+i suspect there's an edge, where if it passes one side dominates, else the other
+amplifying both skill & affinity seems to have helped
+
+but now no bids being made cuz pricing cant understand the huge supply

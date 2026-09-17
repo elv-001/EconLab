@@ -47,6 +47,8 @@ class Agent:
         self.state.current_production_action = Action(ActionType.HOLD)
         self.state.current_trade_actions = []
 
+        self._congestion: dict[str, float] = {}
+
         self.expected_sell_rate: dict[Good, float] = {
             g: 1.0 for g in TRADEABLE_GOODS
         }
@@ -80,7 +82,8 @@ class Agent:
     # ------------------------------------------------------------------
     # Main planning entry point
     # ------------------------------------------------------------------
-    def plan(self, tick: int, market_prices: dict[Good, float]) -> None:
+    def plan(self, tick: int, market_prices: dict[Good, float], congestion=None) -> None:
+        self._congestion = congestion or {}
         shadow = self.compute_shadow_values(market_prices)
 
         # 1. Generate all feasible actions
@@ -150,6 +153,9 @@ class Agent:
         # Production – include any recipe that is affordable OR can be made affordable by buying
         for recipe in RECIPES:
             if self._can_attempt(recipe, market_prices):
+                # Do not produce shelter again if it has already been made
+                if Good.SHELTER in recipe.outputs and self.config.shelter_required and self.state.has_shelter:
+                    continue
                 actions.append(Action(ActionType.PRODUCE, recipe=recipe))
 
         # Buys
@@ -219,13 +225,21 @@ class Agent:
                 continue
             out_val += self._marginal_value(good, expected, tick, market_prices, shadow)
 
+            if good != Good.SHELTER:
+                projected = self.state.inventory_of(good) + expected
+                excess = max(0, projected - self.config.reasonable_stock(good))
+                if excess > 0:
+                    price = self._expected_price(good, market_prices)
+                    #out_val -= (self.config.carrying_cost_rate * excess * price
+                     #           * self.config.carrying_cost_horizon * 0.5)
+
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
         for good, qty in recipe.inputs.items():
             have = self.tools_count if good == Good.TOOLS else self.state.inventory_of(good)
             owned = min(have, qty)
             missing = qty - owned
-            in_cost += self._input_cost(good, owned, market_prices) * 0.5       # opportunity cost of using owned
+            in_cost += self._input_cost(good, owned, market_prices) * 0.4       # opportunity cost of using owned
             if missing > 0:
                 in_cost += self._buy_price(good, market_prices) * missing   # cash cost of buying
 
@@ -240,9 +254,6 @@ class Agent:
 
         if Good.FOOD not in recipe.outputs:
             net -= self._survival_penalty(tick)
-
-        if recipe.name == self.state.last_recipe:
-            net *= 1.15  # mild stickiness bonus, could be config or archetype
 
         return net
 
@@ -260,7 +271,8 @@ class Agent:
         cost = price * qty
         if cost > self.state.money:
             return -math.inf
-
+        
+        direct_need = self._need_value(good, qty, tick)
         benefit = self._marginal_value(good, qty, tick, market_prices, shadow)
         # Self-reliance makes pure market acquisition less attractive
         benefit *= (1.0 - 0.2 * self.state.self_reliance)
@@ -321,25 +333,28 @@ class Agent:
     # ------------------------------------------------------------------
     # Marginal value of goods (need + resale + shadow)
     # ------------------------------------------------------------------
-    def _marginal_value(
-        self,
-        good: Good,
-        qty: int,
-        tick: int,
-        market_prices: dict[Good, float],
-        shadow: dict[Good, float],
-    ) -> float:
+    def _marginal_value(self, good, qty, tick, market_prices, shadow):
         if qty <= 0:
             return 0.0
-
-        # 1. Direct need (steep for food when low)
         need = self._need_value(good, qty, tick)
-
-        # 2. Expected resale value
         resale = qty * self._expected_price(good, market_prices) * self.expected_sell_rate.get(good, 1.0)
 
-        # 3. Shadow value as intermediate input
-        shad = qty * shadow.get(good, self._expected_price(good, market_prices))
+        base = self.config.base_prices().get(good, 1.0)
+        price_ratio = min(1.0, self._expected_price(good, market_prices) / base)
+        shad = qty * shadow.get(good, self._expected_price(good, market_prices)) * price_ratio
+
+        #shad = qty * shadow.get(good, self._expected_price(good, market_prices))
+
+        # Personal glut: if I'm already holding far more of this than I can
+        # realistically sell or use, each additional unit is worth less to me —
+        # regardless of what the population-average market price says.
+        #targets = self.config.targets()
+        #if good in targets and targets[good] > 0:
+         #   owned = self.state.inventory_of(good)
+          #  glut = owned / max(1, targets[good])
+           # personal_discount = 1.0 / (1.0 + 0.3 * max(0.0, glut - 1.0))
+            #resale *= personal_discount
+            #shad *= personal_discount
 
         return need + max(resale, shad)
 
@@ -350,20 +365,24 @@ class Agent:
             critical = self.config.food_consumption_per_tick
             target = self.config.target_food
             if current < critical:
-                return qty * 50.0          # extremely high
+                return qty * 25.0          # extremely high
             if current < target:
                 deficit = target - current
-                return qty * (8.0 + 3.0 * deficit)
+                return qty * (7.0 + 2.0 * deficit)
             return qty * 0.5               # small comfort value
 
         if good == Good.CLOTHES and self.config.clothing_enabled:
             current = self.state.inventory_of(Good.CLOTHES)
-            target = self.config.target_clothes
-            if current < target:
-                return qty * (4.0 + 2.0 * (target - current))
-            return 0.0
+            wear_rate = self.config.comfort_consumption_per_tick
+            ticks_left = current / max(0.01, wear_rate)
 
-        if good == Good.SHELTER and not self.state.has_shelter:
+            if ticks_left < 3:
+                return qty * 15.0
+            if current < self.config.target_clothes:
+                return qty * (4.0 + 1.5 * (self.config.target_clothes - current))
+            return qty * 0.4
+
+        if good == Good.SHELTER and not self.state.has_shelter and self.config.shelter_required:
             return qty * 30.0
 
         return 0.0
@@ -389,7 +408,7 @@ class Agent:
     def _sell_price(self, good: Good, market_prices: dict[Good, float] | None) -> float:
         base = self._expected_price(good, market_prices)
         surplus = self._surplus(good)
-        discount = min(0.55, 0.04 * surplus)
+        discount = min(0.75, 0.04 * surplus)
         return max(0.2 * base, base * (1.0 - discount))
 
     def _input_cost(self, good: Good, qty: int, market_prices: dict[Good, float]) -> float:
@@ -471,11 +490,35 @@ class Agent:
             inv = self.state.inventory_of(good)
             # Simple scarcity factor: more scarce → higher multiplier
             # Cap so it doesn't explode
-            scarcity = 1.0 / (1.0 + inv)          # 1.0 when inv=0, falls toward 0
+            scarcity = 1.0 / (1.0 + inv)**1.2          # 1.0 when inv=0, falls toward 0
             downstream = values[good]
             values[good] = downstream * (1.0 + 1.8 * scarcity)
 
         return values
+
+    # STORAGE CARRYING COST
+    def _excess_inventory(self, good: Good) -> int:
+        owned = self.tools_count if good == Good.TOOLS else self.state.inventory_of(good)
+        return max(0, owned - self.config.reasonable_stock(good))
+
+    def apply_carrying_cost(self, market_prices: dict[Good, float]) -> float:
+        return 0
+        """Holding stock beyond what's useful isn't free. Called once per tick
+        from housekeeping, mirroring how consume_food/consume_comfort already
+        apply per-tick costs."""
+        total = 0.0
+        costs = {}
+        for good in TRADEABLE_GOODS:
+            excess = self._excess_inventory(good)
+            if excess <= 0:
+                continue
+            price = self._expected_price(good, market_prices)
+            total += self.config.carrying_cost_rate * excess * price
+            costs[good] = self.config.carrying_cost_rate * excess * price
+
+        total = min(total, max(0.0, self.state.money))
+        self.state.money -= total
+        return total
 
     # ------------------------------------------------------------------
     # Order generation (called by Simulation)
@@ -687,7 +730,12 @@ class Agent:
     # ------------------------------------------------------------------
     def _productivity(self, recipe: Recipe) -> float:
         if recipe.domain == SkillDomain.GATHERING:
-           return 1.0
+            share = self._congestion.get(recipe.name, 0.0)
+            sustainable = self.config.gathering_sustainable_share
+            excess = max(0.0, share - sustainable)
+            raw = 1.0 / (1.0 + self.config.gathering_congestion_k * excess)
+            return max(self.config.gathering_productivity_floor, raw)
+        
         skill = self.state.skills.get(recipe.domain, 1.0)
         affinity = self.skill_affinities.get(recipe.domain, 1.0)
         skill_f = 1.0 + self.config.skill_effect * (skill - 1.0)
@@ -716,7 +764,7 @@ class Agent:
         for domain, skill in list(self.state.skills.items()):
             if domain == recipe.domain:
                 continue
-            floor = 1.0 if domain in (SkillDomain.GATHERING, SkillDomain.CONSTRUCTION) else 0.3
+            floor = 1
             last = self._last_used(domain)
             if last > self.config.skill_decay_grace_period:
                 self.state.skills[domain] = max(floor, skill - self.config.skill_decay_per_tick)
@@ -751,9 +799,7 @@ class Agent:
         needed = self.config.food_consumption_per_tick
         if self.state.inventory_of(Good.FOOD) < needed:
             self.state.alive = False
-
-            prod = self.state.current_production_action
-            #print(f"DEATH when recipe: {prod.recipe.name if prod and prod.recipe else ""}")
+            #print(f"DEATH agent={self.agent_id} tick={tick} money={self.state.money:.2f} recipe={self.state.current_production_action.recipe.name if ... else 'none'}") # type: ignore
             return 0
         self.use_good(Good.FOOD, needed)
         return needed

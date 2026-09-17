@@ -11,7 +11,7 @@ from econ_sim.config import SimConfig
 from econ_sim.events import EventLog, EventType
 from econ_sim.market import Market
 from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
-from econ_sim.sim_types import Good, Recipe, TradeRecord, Order
+from econ_sim.sim_types import Good, Recipe, TradeRecord, Order, ActionType, SkillDomain
 
 
 @dataclass
@@ -24,6 +24,7 @@ class Simulation:
     tick: int = 0
     snapshots: list[TickSnapshot] = field(default_factory=list)
     _last_prices: dict[Good, float] = field(default_factory=dict)
+    _last_congestion: dict[str, float] = field(default_factory=dict)
     _initial_total_money: float = 0.0
     all_trades: list[TradeRecord] = field(default_factory=list)
 
@@ -37,6 +38,8 @@ class Simulation:
         self.dead_agents = []
         self._last_prices = dict(self.config.base_prices())
         self._initial_total_money = sum(a.state.money for a in self.agents)
+        self._last_congestion = {}
+        self._congestion_ema = {}
 
         self.total_fiber_trades = {}
 
@@ -51,6 +54,8 @@ class Simulation:
         self._last_prices = dict(self.config.base_prices())
         self._initial_total_money = sum(a.state.money for a in self.agents)
         self.all_trades.clear()
+        self._last_congestion = {}
+        self._congestion_ema = {}
 
     def run(self, num_ticks: int | None = None) -> SimReport:
         ticks = num_ticks if num_ticks is not None else self.config.num_ticks
@@ -63,6 +68,7 @@ class Simulation:
 
     def step(self) -> TickSnapshot:
         self._phase_decisions()
+        self._update_congestion()
         bids, asks = self._phase_offers()
         trades = self._phase_matching(bids, asks)
         self.all_trades.extend(trades)
@@ -216,7 +222,7 @@ class Simulation:
 
     def _phase_decisions(self):
         for agent in self.agents:
-            agent.plan(self.tick, self._last_prices)
+            agent.plan(self.tick, self._last_prices, self._last_congestion)
 
     def _phase_production(self) -> dict[str, int]:
         totals: dict[str, int] = defaultdict(int)
@@ -332,6 +338,7 @@ class Simulation:
 
         clothes_bids = [o for o in bids if o.good == Good.CLOTHES]
         clothes_asks = [o for o in asks if o.good == Good.CLOTHES]
+
         """
         print(
                     f"CLOTHES BOOK: "
@@ -382,7 +389,8 @@ class Simulation:
         sold_by_ask_id: dict[int, int] = defaultdict(int)
 
         tool_total = 0
-        for trade in result.trades:
+        ordered_trades = sorted(result.trades, key=lambda t: 0 if t.good == Good.FOOD else 1)
+        for trade in ordered_trades:
             buyer = agent_map[trade.buyer_id]
             seller = agent_map[trade.seller_id]
             cost = trade.price * trade.quantity
@@ -451,35 +459,57 @@ class Simulation:
 
         return result.trades
 
+    def _update_congestion(self) -> None:
+        counts = Counter()
+        n = max(1, len(self.agents))
+        for agent in self.agents:
+            action = agent.state.current_production_action
+            if action and action.action_type == ActionType.PRODUCE and action.recipe \
+            and action.recipe.domain == SkillDomain.GATHERING:
+                counts[action.recipe.name] += 1
+        raw = {name: c / n for name, c in counts.items()}
+        alpha = self.config.congestion_ema_alpha  # e.g. 0.15, same spirit as price_ema_alpha
+        for name in set(raw) | set(self._congestion_ema):
+            prev = self._congestion_ema.get(name, 0.0)
+            self._congestion_ema[name] = (1 - alpha) * prev + alpha * raw.get(name, 0.0)
+        self._last_congestion = self._congestion_ema
+
     def _update_price_from_book(self, good: Good, bids: list[Order], asks: list[Order]) -> None:
         bid_qty = sum(o.quantity for o in bids if o.good == good)
         ask_qty = sum(o.quantity for o in asks if o.good == good)
-
         if bid_qty + ask_qty == 0:
             return
-
-        # Imbalance ∈ [-1, +1], positive = excess demand
-        imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty)
 
         base = self.config.base_prices()[good]
         prev = self._last_prices.get(good, base)
 
-        # How strongly imbalance moves the price
-        adjustment = 1.0 + 0.15 * imbalance          # tune 0.10–0.25
-        target = prev * adjustment
+        flow_imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty)
 
-        # Still clamp
+        # Stock overhang sets a price LEVEL relative to base — not a repeated
+        # cut on the already-adjusted previous price. This is what keeps it
+        # from compounding into a runaway spiral.
+        stock_multiplier = 1.0
+        targets = self.config.targets()
+        if good in targets and targets[good] > 0:
+            total_stock = sum(a.state.inventory_of(good) for a in self.agents)
+            healthy_stock = len(self.agents) * targets[good]
+            overhang = total_stock / max(1, healthy_stock)
+            stock_multiplier = 1.0 / (1.0 + 0.3 * max(0.0, overhang - 1.0))
+
+        target_price = base * stock_multiplier * (1.0 + 0.15 * flow_imbalance)
+
         lo = base * self.config.price_clamp_min_factor
         hi = base * self.config.price_clamp_max_factor
-        target = max(lo, min(hi, target))
+        target_price = max(lo, min(hi, target_price))
 
         alpha = self.config.price_ema_alpha
-        self._last_prices[good] = (1 - alpha) * prev + alpha * target
+        self._last_prices[good] = (1 - alpha) * prev + alpha * target_price
 
     def _phase_housekeeping(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:
-            agent.decay_inventory(self.tick)
             consumed = agent.consume_food(self.tick)
+            agent.decay_inventory(self.tick)
+            #agent.apply_carrying_cost(self._last_prices)
             if consumed > 0:
                 self.event_log.record(
                     self.tick,

@@ -24,7 +24,11 @@ class SimConfig:
     input_cost_weight: float = 0.15  # penalty for using inputs in production
 
     # Survival: agents consume food each tick
-    food_consumption_per_tick: int = 2
+    food_consumption_per_tick: int = 1
+    gathering_congestion_k: float = 6.0  # tune: higher = crowding bites harder
+    gathering_sustainable_share: float = 0.05 # what % of population should forage
+    gathering_productivity_floor: float = 0.65
+    congestion_ema_alpha: float = 0.3
 
     # Food perishes after this many ticks in inventory
     food_shelf_life_enabled: bool = True
@@ -32,6 +36,7 @@ class SimConfig:
     GOODS_SHELF_LIFE = {
         Good.FOOD: 5,
         Good.WOOD: 150,
+        Good.CLOTHES: 40,
     }
 
     # food consumption should increase without shelter
@@ -39,16 +44,16 @@ class SimConfig:
     shelter_productivity_loss = 0.25  # how much producitivity is lost without shelter
 
     # Inventory targets (agents try to maintain these levels)
-    target_food: int = 8
+    target_food: int = 7
     target_shelter: int = 1
     surplus_buffer: int = 1
 
     # Clothing
     clothing_enabled: bool = True
-    target_clothes: int = 4
-    comfort_consumption_per_tick: float = 0.85 # slower "wear rate" than food's per-tick eating
+    target_clothes: int = 5
+    comfort_consumption_per_tick: float = 1 # slower "wear rate" than food's per-tick eating
     comfort_urgency_weight: float = 1.6        # below food/tools, above pure luxury
-    comfort_productivity_loss: float = 0.15
+    comfort_productivity_loss: float = 0.25
 
     # Base reservation prices (used when no market history)
     base_price_food: float = 3.0
@@ -67,7 +72,7 @@ class SimConfig:
     sell_value_weight: float = 0.4
 
     # SimConfig
-    tool_max_uses: int = 5    # a tool survives this many farm cycles
+    tool_max_uses: int = 5   # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
 
     # Bounded rationality: pick randomly among top-N scored recipes
@@ -81,11 +86,14 @@ class SimConfig:
     skill_decay_per_tick: float = 0.01
 
     skill_decay_grace_period: int = 15
-    
+
     # Trade memory
     memory_decay_ticks: int = 50
     trust_gain_per_trade: float = 0.05
     trust_initial: float = 0.5
+
+    carrying_cost_rate: float = 0.002   # fraction of unit price charged per excess unit, per tick
+    carrying_cost_horizon: int = 10       # ticks of anticipated holding priced into production decisions
 
     # Market
     min_order_quantity: int = 1
@@ -97,8 +105,8 @@ class SimConfig:
     skill_affinity_max: float = 1.35
 
     # impact of skill to productivity; higher value should magnify comparative advantage
-    skill_effect: float = 0.6
-    affinity_effect: float = 0.4
+    skill_effect: float = 1
+    affinity_effect: float = 0.7
 
     # Price discovery smoothing (EMA alpha; clamp as fraction of base price)
     price_ema_alpha: float = 0.1
@@ -132,6 +140,20 @@ class SimConfig:
             result[Good.SHELTER] = self.target_shelter
         return result
 
+    def reasonable_stock(self, good: Good) -> int:
+        """How much of this good is actually useful to hold onto.
+        Consumption goods: their target. Intermediate/capital goods: a small
+        working buffer based on the largest single recipe's requirement.
+        No good needs a hand-picked category — this falls out of existing data."""
+
+        targets = self.targets()
+        if good in targets:
+            return targets[good]
+        max_input = max((r.inputs.get(good, 0) for r in RECIPES), default=0)
+        if max_input == 0:
+            return 0  # not used as an input anywhere — no carrying cost applies
+        return max_input * 2  # ~2 recipe-calls worth of buffer, not zero, not unlimited
+
 # ARCHETYPE MIX
 ARCHETYPE_MIX: dict[str, float] = {
     "generalist": 1.0,
@@ -147,7 +169,7 @@ ALL_RECIPES: list[Recipe] = [
         name="craft_tools", 
            inputs={Good.WOOD: 3}, 
            outputs={Good.TOOLS: 1},
-           domain=SkillDomain.CARPENTRY, 
+           domain=SkillDomain.CARPENTRY,
            min_skill=1.3,
         ),
     Recipe(
@@ -171,10 +193,10 @@ ALL_RECIPES: list[Recipe] = [
            min_skill=1.0, 
     ),
     Recipe(name="weave_cloth", 
-           inputs={Good.FIBER: 2, Good.TOOLS: 1}, 
-           outputs={Good.CLOTHES: 3},
+           inputs={Good.FIBER: 3, Good.TOOLS: 1}, 
+           outputs={Good.CLOTHES: 5},
            domain=SkillDomain.WEAVING, 
-           min_skill=1.3, 
+           min_skill=1.2,
     ),
 ]
 

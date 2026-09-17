@@ -7,7 +7,7 @@ from typing import Any, Counter
 import statistics
 
 from econ_sim.agent import Agent, create_agents
-from econ_sim.config import SimConfig
+from econ_sim.config import SimConfig, RECIPE_BY_NAME
 from econ_sim.events import EventLog, EventType
 from econ_sim.market import Market
 from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
@@ -99,7 +99,7 @@ class Simulation:
         )
 
         self.tick += 1
-        if self.tick == 999:
+        if self.tick == 499:
             craft_counts = sorted((a.state.recipe_counts.get("craft_tools", 0) for a in self.agents), reverse=True)
             chop_counts = sorted((a.state.recipe_counts.get("chop_wood", 0) for a in self.agents), reverse=True)
             fiber_counts = sorted((a.state.recipe_counts.get("gather_fiber", 0) for a in self.agents), reverse=True)
@@ -130,7 +130,6 @@ class Simulation:
 
             print("total tools in inventory:", total_tools)
             print("total wood:", total_wood)
-            print('total tool used:', int(self.total_tool_use/7))
             print("total clothes in inventory", sum(
                 a.state.inventory_of(Good.CLOTHES)
                 for a in self.agents
@@ -509,7 +508,6 @@ class Simulation:
         for agent in self.agents:
             consumed = agent.consume_food(self.tick)
             agent.decay_inventory(self.tick)
-            #agent.apply_carrying_cost(self._last_prices)
             if consumed > 0:
                 self.event_log.record(
                     self.tick,

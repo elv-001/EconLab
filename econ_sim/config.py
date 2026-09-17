@@ -37,6 +37,7 @@ class SimConfig:
         Good.FOOD: 5,
         Good.WOOD: 150,
         Good.CLOTHES: 40,
+        Good.FIBER: 30,
     }
 
     # food consumption should increase without shelter
@@ -76,7 +77,7 @@ class SimConfig:
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
 
     # Bounded rationality: pick randomly among top-N scored recipes
-    production_top_n: int = 2
+    production_top_n: int = 3
 
     # Learning-by-doing: skill gain per use of a recipe
     skill_gain_per_use: float = 0.03
@@ -92,7 +93,7 @@ class SimConfig:
     trust_gain_per_trade: float = 0.05
     trust_initial: float = 0.5
 
-    carrying_cost_rate: float = 0.002   # fraction of unit price charged per excess unit, per tick
+    carrying_cost_rate: float = 0.01   # fraction of unit price charged per excess unit, per tick
     carrying_cost_horizon: int = 10       # ticks of anticipated holding priced into production decisions
 
     # Market
@@ -194,9 +195,9 @@ ALL_RECIPES: list[Recipe] = [
     ),
     Recipe(name="weave_cloth", 
            inputs={Good.FIBER: 3, Good.TOOLS: 1}, 
-           outputs={Good.CLOTHES: 5},
+           outputs={Good.CLOTHES: 6},
            domain=SkillDomain.WEAVING, 
-           min_skill=1.2,
+           min_skill=1.4,
     ),
 ]
 

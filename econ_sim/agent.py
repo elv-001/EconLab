@@ -92,6 +92,53 @@ class Agent:
         # 2. Score them
         scored = [(a, self._value_action(a, tick, market_prices, shadow)) for a in actions]
 
+        skill = self.state.skills[SkillDomain.WEAVING]
+        if skill >= 1.2:
+            value = self._value_produce(
+                RECIPE_BY_NAME["weave_cloth"],
+                tick,
+                market_prices,
+                self.compute_shadow_values(market_prices),
+            )
+
+        if self.state.skills.get(SkillDomain.WEAVING, 0) >= 1.2:
+            vals = []
+
+            for r in RECIPES:
+                if self._can_attempt(r, market_prices):
+                    v = self._value_produce(
+                        r, tick, market_prices, self.compute_shadow_values(market_prices)
+                    )
+                    vals.append((r.name, v))
+
+            if vals:
+                vals.sort(key=lambda x: x[1], reverse=True)
+
+                weave_value = next(
+                    (v for n, v in vals if n == "weave_cloth"),
+                    None
+                )
+
+                weave_rank = next(
+                    (
+                        i + 1
+                        for i, (name, _) in enumerate(vals)
+                        if name == "weave_cloth"
+                    ),
+                    None
+                )
+                """
+                print(
+                    self.agent_id,
+                    "money=", round(self.state.money, 2),
+                    "fiber=", round(self.state.inventory_of(Good.FIBER), 2),
+                    "tools=", self.tools_count,
+                    "weave_rank=", weave_rank,
+                    "weave_value=", weave_value,
+                    "top=", vals[:4],
+                )
+                """
+
         # 3. Select best production action (with opportunity cost already inside the score)
         prod_actions = [(a, v) for a, v in scored if a.action_type == ActionType.PRODUCE]
         if prod_actions:
@@ -229,9 +276,17 @@ class Agent:
                 projected = self.state.inventory_of(good) + expected
                 excess = max(0, projected - self.config.reasonable_stock(good))
                 if excess > 0:
-                    price = self._expected_price(good, market_prices)
-                    #out_val -= (self.config.carrying_cost_rate * excess * price
-                     #           * self.config.carrying_cost_horizon * 0.5)
+                    # don't penalize stock that's already going to market this tick
+                    pending_sale = next(
+                        (a.quantity for a in self.state.current_trade_actions
+                        if a.action_type == ActionType.SELL and a.good == good),
+                        0
+                    )
+                    taxable_excess = max(0, excess - pending_sale)
+                    if taxable_excess > 0:
+                        price = self._expected_price(good, market_prices)
+                        out_val -= (self.config.carrying_cost_rate * taxable_excess * price
+                                    * self.config.carrying_cost_horizon)
 
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
@@ -328,7 +383,34 @@ class Agent:
         if ticks_left > 3:
             return 0.0
         # Steeply rising penalty as death approaches
-        return 100.0 / max(0.1, ticks_left)**2
+        return 100.0 / max(1.0, ticks_left)**2
+
+    def inventory_holding_cost(
+        self,
+        market_prices: dict[Good, float],
+    ) -> float:
+        """
+        Cost of storing excess inventory.
+        Applies every tick, not only when producing.
+        """
+
+        cost = 0.0
+
+        for good in Good:
+            excess = self._excess_inventory(good)
+
+            if excess <= 0:
+                continue
+
+            price = self._expected_price(good, market_prices)
+
+            cost += (
+                excess
+                * price
+                * self.config.carrying_cost_rate
+            )
+
+        return cost
 
     # ------------------------------------------------------------------
     # Marginal value of goods (need + resale + shadow)
@@ -500,25 +582,6 @@ class Agent:
     def _excess_inventory(self, good: Good) -> int:
         owned = self.tools_count if good == Good.TOOLS else self.state.inventory_of(good)
         return max(0, owned - self.config.reasonable_stock(good))
-
-    def apply_carrying_cost(self, market_prices: dict[Good, float]) -> float:
-        return 0
-        """Holding stock beyond what's useful isn't free. Called once per tick
-        from housekeeping, mirroring how consume_food/consume_comfort already
-        apply per-tick costs."""
-        total = 0.0
-        costs = {}
-        for good in TRADEABLE_GOODS:
-            excess = self._excess_inventory(good)
-            if excess <= 0:
-                continue
-            price = self._expected_price(good, market_prices)
-            total += self.config.carrying_cost_rate * excess * price
-            costs[good] = self.config.carrying_cost_rate * excess * price
-
-        total = min(total, max(0.0, self.state.money))
-        self.state.money -= total
-        return total
 
     # ------------------------------------------------------------------
     # Order generation (called by Simulation)
@@ -817,6 +880,7 @@ class Agent:
             self.remove_good(Good.CLOTHES, actual)
             self.state.comfort_debt -= actual
 
+    # changing how primary activity is measured/??
     def primary_activity(self, window: int = 25) -> str | None:
         recent = list(self.state.recent_recipes)[-window:]
         if not recent:

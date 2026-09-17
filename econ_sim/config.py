@@ -35,7 +35,7 @@ class SimConfig:
 
     GOODS_SHELF_LIFE = {
         Good.FOOD: 5,
-        Good.WOOD: 150,
+        Good.WOOD: 50,
         Good.CLOTHES: 40,
         Good.FIBER: 30,
     }
@@ -189,12 +189,12 @@ ALL_RECIPES: list[Recipe] = [
     ),
     Recipe(name="gather_fiber", 
            inputs={}, 
-           outputs={Good.FIBER: 2},
+           outputs={Good.FIBER: 1},
            domain=SkillDomain.HARVESTING, 
            min_skill=1.0, 
     ),
     Recipe(name="weave_cloth", 
-           inputs={Good.FIBER: 3, Good.TOOLS: 1}, 
+           inputs={Good.FIBER: 2, Good.TOOLS: 1}, 
            outputs={Good.CLOTHES: 6},
            domain=SkillDomain.WEAVING, 
            min_skill=1.4,

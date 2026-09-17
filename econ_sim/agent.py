@@ -277,16 +277,19 @@ class Agent:
                 excess = max(0, projected - self.config.reasonable_stock(good))
                 if excess > 0:
                     # don't penalize stock that's already going to market this tick
+                    """
                     pending_sale = next(
                         (a.quantity for a in self.state.current_trade_actions
                         if a.action_type == ActionType.SELL and a.good == good),
                         0
                     )
+                    
                     taxable_excess = max(0, excess - pending_sale)
                     if taxable_excess > 0:
                         price = self._expected_price(good, market_prices)
                         out_val -= (self.config.carrying_cost_rate * taxable_excess * price
                                     * self.config.carrying_cost_horizon)
+                                    """
 
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
@@ -306,6 +309,11 @@ class Agent:
         # Mild self-reliance penalty if the recipe required buying
         if any(self._missing(g, q) > 0 for g, q in recipe.inputs.items()):
             net *= (1.0 - 0.15 * self.state.self_reliance)
+
+        # Penalize for switching
+        primary = self.primary_activity()
+        if primary and recipe.domain != RECIPE_BY_NAME[primary].domain:
+            net *= 1
 
         if Good.FOOD not in recipe.outputs:
             net -= self._survival_penalty(tick)

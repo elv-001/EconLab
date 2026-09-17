@@ -225,19 +225,23 @@ class Simulation:
 
     def _phase_production(self) -> dict[str, int]:
         totals: dict[str, int] = defaultdict(int)
-        choices: list[tuple[Agent, Recipe]] = []
+        choices = Counter()
         e=0
         tool_uses = 0
-        wood_used = 0
         clothes_produced = 0
-        wood_produced = 0
-        fiber_produced = 0
-
 
         for agent in self.agents:
             agent.execute_action(self.tick, self._last_prices)
+            recipe = agent.state.last_recipe
+            if recipe:
+                choices[recipe] += 1
             """
-            recipe,f = agent.confirm_current_recipe(self._last_prices)
+            self.event_log.record(
+                            self.tick,
+                            EventType.PRODUCTION,
+                            agent_id=agent.agent_id,
+                            **log_data,
+                        )
             if recipe is not None:
                 if Good.TOOLS in recipe.inputs:
                     tool_uses += recipe.inputs[Good.TOOLS]
@@ -266,38 +270,13 @@ class Simulation:
             if recipe is not None:
                 choices.append((agent, recipe))
         """
-        #print(f"Tools produced this tick: {tool_produced}")
-        #print(f"Total Tools produced: {self.total_tool_produce}")
-        #print(f"Clothes produced this tick: {clothes_produced}")
-        #print(f"Fiber produced this tick: {fiber_produced}")
         self.total_clothes_produced += clothes_produced
         self.total_tool_use += tool_uses
 
         #print(f"Fallback: {e}")
-        recipe_counts = Counter(recipe.name for agent, recipe in choices)
 
-        #for recipe, count in recipe_counts.items():
-        #    print(f"{recipe}: {count} agent(s)")
-        #print("FIBER:", sum(agent.state.inventory[Good.FIBER] for agent in self.agents))
-
-        for agent, recipe in choices:
-            outputs = agent.execute_production(
-                recipe, tick=self.tick
-            )
-            for good, qty in outputs.items():
-                totals[good] += qty
-            log_data: dict[str, object] = {
-                "recipe": recipe.name,
-                "outputs": outputs,
-            }
-
-            self.event_log.record(
-                self.tick,
-                EventType.PRODUCTION,
-                agent_id=agent.agent_id,
-                **log_data,
-            )
-
+        #for recipe, count in choices.items():
+         #   print(f"{recipe}: {count} agent(s)")
         return dict(totals)
 
     def _phase_offers(self) -> tuple[list, list]:

@@ -1,13 +1,12 @@
 from __future__ import annotations
+
 import statistics
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
-from collections import Counter, defaultdict
-import statistics
-from dataclasses import dataclass, field
-
 from econ_sim.agent import Agent
-from econ_sim.config import SimConfig, TRADEABLE_GOODS
+from econ_sim.config import TRADEABLE_GOODS, SimConfig
 from econ_sim.sim_types import Good, TradeRecord
 from econ_sim.wealth_distribution import wealth_distribution_report
 

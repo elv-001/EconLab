@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 from econ_sim.config import DEFAULT_CONFIG, SimConfig
-from econ_sim.sim_types import Good
 from econ_sim.metrics import SimReport
+from econ_sim.sim_types import Good
 from econ_sim.simulation import Simulation
+
 
 def run_once(config: SimConfig, quiet: bool = True) -> dict:
     """Run a single simulation and return its summary dict. No printing, no argparse."""
@@ -75,7 +76,7 @@ def print_summary(report: SimReport) -> None:
 
     wealth_distribution = summary.get("wealth_distribution")
     if wealth_distribution:
-        print("")
+        print("\n")
         print(wealth_distribution)
 
     # Skill distribution
@@ -106,7 +107,7 @@ def print_summary(report: SimReport) -> None:
         print(f"  {'archetype':<16}{'dominant_role':<16}{'share':>8}{'n':>5}   counts")
         for archetype, stats in roles.items():
             print(
-                f"  {archetype:<16}{str(stats['dominant_role']):<16}"
+                f"  {archetype:<16}{stats['dominant_role']!s:<16}"
                 f"{stats['dominant_share']*100:>7.1f}%{stats['n']:>5}   {stats['counts']}"
             )
 

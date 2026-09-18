@@ -24,15 +24,14 @@ from __future__ import annotations
 import argparse
 import statistics
 import sys
+from collections.abc import Callable
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields
-from typing import Any, Callable
+from typing import Any
 
-from contextlib import contextmanager, ExitStack
-
-from econ_sim.agent import Agent
-from econ_sim.config import SimConfig, RECIPE_BY_NAME
-from econ_sim.simulation import Simulation
+from econ_sim.config import RECIPE_BY_NAME, SimConfig
 from econ_sim.sim_types import Good, SkillDomain
+from econ_sim.simulation import Simulation
 
 
 @contextmanager
@@ -213,7 +212,7 @@ def _apply_overrides(config: SimConfig, overrides: dict[str, Any]) -> SimConfig:
     """
     valid_fields = {f.name for f in fields(config)}
     new_config = SimConfig(seed=config.seed)
-    for key, value in {**{"seed": config.seed}, **overrides}.items():
+    for key, value in {"seed": config.seed, **overrides}.items():
         if key not in valid_fields and not hasattr(new_config, key):
             raise ValueError(f"Unknown config field: {key}")
         setattr(new_config, key, value)
@@ -513,26 +512,26 @@ def run_correctness_suite(
 # here means "how do I tune X" becomes "python eval.py sweep X" instead of
 # rewriting a one-off script each time.
 SWEEP_PRESETS: dict[str, dict[str, Any]] = {
-    "weave_min_skill": dict(
-        param_name="recipe:weave_cloth:min_skill",
-        values=[1.2, 1.3, 1.4, 1.6],
-    ),
-    "skill_decay": dict(
-        param_name="skill_decay_per_tick",
-        values=[0.001, 0.005, 0.01, 0.02],
-    ),
-    "tool_durability": dict(
-        param_name="tool_max_uses",
-        values=[3, 5, 7, 10],
-    ),
-    "comfort_urgency": dict(
-        param_name="comfort_urgency_weight",
-        values=[0.8, 1.3, 1.8, 2.3],
-    ),
-    "comfort_productivity_loss": dict(
-        param_name="comfort_productivity_loss",
-        values=[0.1, 0.12, 0.14, 0.16, 0.18, 0.2]
-    ),
+    "weave_min_skill": {
+        "param_name": "recipe:weave_cloth:min_skill",
+        "values": [1.2, 1.3, 1.4, 1.6],
+    },
+    "skill_decay": {
+        "param_name": "skill_decay_per_tick",
+        "values": [0.001, 0.005, 0.01, 0.02],
+    },
+    "tool_durability": {
+        "param_name": "tool_max_uses",
+        "values": [3, 5, 7, 10],
+    },
+    "comfort_urgency": {
+        "param_name": "comfort_urgency_weight",
+        "values": [0.8, 1.3, 1.8, 2.3],
+    },
+    "comfort_productivity_loss": {
+        "param_name": "comfort_productivity_loss",
+        "values": [0.1, 0.12, 0.14, 0.16, 0.18, 0.2]
+    },
 }
 
 

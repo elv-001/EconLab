@@ -1,19 +1,29 @@
 from __future__ import annotations
 
-import random
 import math
-from collections import deque, Counter
-from typing import TYPE_CHECKING
+import random
+from collections import Counter, deque
 
 from econ_sim.config import (
-    GOAL_CHAIN_RECIPES, RECIPES, SimConfig, RECIPE_BY_NAME,
-    TRADEABLE_GOODS, ARCHETYPE_MIX
+    ARCHETYPE_MIX,
+    RECIPE_BY_NAME,
+    RECIPES,
+    TRADEABLE_GOODS,
+    SimConfig,
 )
 from econ_sim.sim_types import (
-    AgentState, Good, Order, Recipe, SkillDomain,
-    AgentArchetype, ARCHETYPES, InventoryLot,
-    Action, ActionType
+    ARCHETYPES,
+    Action,
+    ActionType,
+    AgentArchetype,
+    AgentState,
+    Good,
+    InventoryLot,
+    Order,
+    Recipe,
+    SkillDomain,
 )
+
 
 class Agent:
     def __init__(
@@ -84,16 +94,6 @@ class Agent:
 
         # 2. Score them
         scored = [(a, self._value_action(a, tick, market_prices, shadow)) for a in actions]
-
-        skill = self.state.skills[SkillDomain.WEAVING]
-        if skill >= 1.2:
-            value = self._value_produce(
-                RECIPE_BY_NAME["weave_cloth"],
-                tick,
-                market_prices,
-                self.compute_shadow_values(market_prices),
-            )
-
         if self.state.skills.get(SkillDomain.WEAVING, 0) >= 1.2:
             vals = []
 
@@ -103,34 +103,6 @@ class Agent:
                         r, tick, market_prices, self.compute_shadow_values(market_prices)
                     )
                     vals.append((r.name, v))
-
-            if vals:
-                vals.sort(key=lambda x: x[1], reverse=True)
-
-                weave_value = next(
-                    (v for n, v in vals if n == "weave_cloth"),
-                    None
-                )
-
-                weave_rank = next(
-                    (
-                        i + 1
-                        for i, (name, _) in enumerate(vals)
-                        if name == "weave_cloth"
-                    ),
-                    None
-                )
-                """
-                print(
-                    self.agent_id,
-                    "money=", round(self.state.money, 2),
-                    "fiber=", round(self.state.inventory_of(Good.FIBER), 2),
-                    "tools=", self.tools_count,
-                    "weave_rank=", weave_rank,
-                    "weave_value=", weave_value,
-                    "top=", vals[:4],
-                )
-                """
 
         # 3. Select best production action (with opportunity cost already inside the score)
         prod_actions = [(a, v) for a, v in scored if a.action_type == ActionType.PRODUCE]
@@ -166,8 +138,8 @@ class Agent:
                 continue
             chosen_trades.append(action)
             used_goods.add(action.good)
-            #if len(chosen_trades) >= getattr(self.config, "max_trades_per_tick", 4):
-            #    break
+            if len(chosen_trades) >= getattr(self.config, "max_trades_per_tick", 2):
+                break
 
         # 5. If the chosen production needs missing inputs, force the corresponding BUYs
         #    to the front so the agent actually tries to acquire them this tick
@@ -260,29 +232,16 @@ class Agent:
         # Output value
         out_val = 0.0
         for good, base_qty in recipe.outputs.items():
-            expected = max(0, int(round(base_qty * prod)))
+            expected = max(0, round(base_qty * prod))
             if expected <= 0:
                 continue
             out_val += self._marginal_value(good, expected, tick, market_prices, shadow)
-
-            if good != Good.SHELTER:
-                projected = self.state.inventory_of(good) + expected
-                excess = max(0, projected - self.config.reasonable_stock(good))
-                if excess > 0:
-                    # don't penalize stock that's already going to market this tick
-                    """
-                    pending_sale = next(
-                        (a.quantity for a in self.state.current_trade_actions
-                        if a.action_type == ActionType.SELL and a.good == good),
-                        0
-                    )
-                    
-                    taxable_excess = max(0, excess - pending_sale)
-                    if taxable_excess > 0:
-                        price = self._expected_price(good, market_prices)
-                        out_val -= (self.config.carrying_cost_rate * taxable_excess * price
-                                    * self.config.carrying_cost_horizon)
-                                    """
+            projected = self.state.inventory_of(good) + expected
+            excess = max(0, projected - self.config.reasonable_stock(good))
+            if excess > 0:
+                price = self._expected_price(good, market_prices)
+                out_val -= (self.config.carrying_cost_rate * excess * price
+                            * self.config.carrying_cost_horizon)
 
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
@@ -303,11 +262,6 @@ class Agent:
         if any(self._missing(g, q) > 0 for g, q in recipe.inputs.items()):
             net *= (1.0 - 0.15 * self.state.self_reliance)
 
-        # Penalize for switching
-        primary = self.primary_activity()
-        if primary and recipe.domain != RECIPE_BY_NAME[primary].domain:
-            net *= 1
-
         if Good.FOOD not in recipe.outputs:
             net -= self._survival_penalty(tick)
 
@@ -315,10 +269,6 @@ class Agent:
             rate = self.expected_sell_rate.get(good, 1.0)
             if rate < 0.7:
                 net *= (0.6 + 0.4 * rate)   # scales down when the agent cannot sell
-
-        skill = self.state.skills[recipe.domain]
-        if skill > 1.3:
-            net *= 1.0 + 0.35 * (skill - 1.0)
 
         # in _value_produce, after computing net:
         recent = list(self.state.recent_recipes)[-5:]
@@ -347,7 +297,6 @@ class Agent:
         if cost > self.state.money:
             return -math.inf
         
-        direct_need = self._need_value(good, qty, tick)
         benefit = self._marginal_value(good, qty, tick, market_prices, shadow)
         # Self-reliance makes pure market acquisition less attractive
         benefit *= (1.0 - 0.2 * self.state.self_reliance)
@@ -405,33 +354,6 @@ class Agent:
         # Steeply rising penalty as death approaches
         return 100.0 / max(1.0, ticks_left)**2
 
-    def inventory_holding_cost(
-        self,
-        market_prices: dict[Good, float],
-    ) -> float:
-        """
-        Cost of storing excess inventory.
-        Applies every tick, not only when producing.
-        """
-
-        cost = 0.0
-
-        for good in Good:
-            excess = self._excess_inventory(good)
-
-            if excess <= 0:
-                continue
-
-            price = self._expected_price(good, market_prices)
-
-            cost += (
-                excess
-                * price
-                * self.config.carrying_cost_rate
-            )
-
-        return cost
-
     # ------------------------------------------------------------------
     # Marginal value of goods (need + resale + shadow)
     # ------------------------------------------------------------------
@@ -449,29 +371,6 @@ class Agent:
             discount = 0.55 + 0.45 * (price_ratio / 0.6)
             resale *= discount
             shad  *= discount
-        return need + max(resale, shad)
-
-        # Personal glut: if I'm already holding far more of this than I can
-        # realistically sell or use, each additional unit is worth less to me —
-        # regardless of what the population-average market price says.
-
-        """
-        reasonable = self.config.reasonable_stock(good)
-
-        if reasonable > 0:
-            owned = self.state.inventory_of(good)
-            glut = owned / reasonable
-
-            surplus = max(0.0, glut - 1.0)
-
-            personal_discount = 1.0 / (
-                1.0 + 0.1 * surplus ** 2
-            )
-
-            resale *= personal_discount
-            shad *= personal_discount
-        """
-            
         return need + max(resale, shad)
 
     def _need_value(self, good: Good, qty: int, tick: int) -> float:
@@ -544,9 +443,6 @@ class Agent:
         if good == Good.CLOTHES:
             return max(1, self.config.target_clothes - self.state.inventory_of(Good.CLOTHES))
         # Capital/intermediate goods: buy more when cheap relative to base
-        base = self.config.base_prices().get(good, 1.0)
-        price = self._expected_price(good, market_prices)
-        # simplest version: just scale desired qty inversely with price ratio
         target = self.config.reasonable_stock(good)
         have = self.state.inventory_of(good)
         return max(1, target - have) if have < target else 1

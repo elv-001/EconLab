@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import typing
+from dataclasses import dataclass
 
 from econ_sim.sim_types import Good, Recipe, SkillDomain
+
 
 @dataclass
 class SimConfig:
@@ -33,7 +35,7 @@ class SimConfig:
     # Food perishes after this many ticks in inventory
     food_shelf_life_enabled: bool = True
 
-    GOODS_SHELF_LIFE = {
+    GOODS_SHELF_LIFE: typing.ClassVar = {
         Good.FOOD: 5,
         Good.WOOD: 50,
         Good.CLOTHES: 40,
@@ -63,15 +65,6 @@ class SimConfig:
     base_price_fiber: float = 1.5
     base_price_clothes: float = 8.0
 
-    # Price adjustment from shortage/surplus (fraction of base price)
-    shortage_premium: float = 0.5
-    surplus_discount: float = 0.3
-
-    # Production scoring weights
-    food_urgency_weight: float = 2.0
-    shelter_urgency_weight: float = 1.7
-    sell_value_weight: float = 0.4
-
     # SimConfig
     tool_max_uses: int = 5   # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
@@ -82,24 +75,16 @@ class SimConfig:
 
     # Learning-by-doing: skill gain per use of a recipe
     skill_gain_per_use: float = 0.03
-    skill_productivity_cap: float = 1.9
+    skill_productivity_cap: float = 1.6
     skill_productivity_base: float = 1.0
     skill_gain_decay_exponent: float = 3
     skill_decay_per_tick: float = 0.05
-
     skill_decay_grace_period: int = 5
 
-    # Trade memory
-    memory_decay_ticks: int = 50
-    trust_gain_per_trade: float = 0.05
-    trust_initial: float = 0.5
-
-    carrying_cost_rate: float = 0.01   # fraction of unit price charged per excess unit, per tick
-    carrying_cost_horizon: int = 10       # ticks of anticipated holding priced into production decisions
+    carrying_cost_rate: float = 0.03
+    carrying_cost_horizon: int = 10
 
     # Market
-    min_order_quantity: int = 1
-    max_order_fraction: float = 0.9  # max fraction of surplus to offer
     use_midpoint_pricing: bool = True
 
     # Random skill affinity at spawn (multiplier range)
@@ -114,12 +99,6 @@ class SimConfig:
     price_ema_alpha: float = 0.1
     price_clamp_min_factor: float = 0.1
     price_clamp_max_factor: float = 10
-
-    # Planning depth
-    planning_depth_urgent: int = 1
-    planning_depth_long: int = 3
-    chain_depth: int = 4
-    chain_discount: float = 0.95
 
     # Invariant checks
     check_invariants: bool = True
@@ -191,14 +170,13 @@ ALL_RECIPES: list[Recipe] = [
     ),
     Recipe(name="weave_cloth", 
            inputs={Good.FIBER: 3, Good.TOOLS: 1}, 
-           outputs={Good.CLOTHES: 5},
+           outputs={Good.CLOTHES: 6},
            domain=SkillDomain.WEAVING, 
            min_skill=1.4,
     ),
 ]
 
 RECIPE_BY_NAME: dict[str, Recipe] = {r.name: r for r in ALL_RECIPES}
-CAPITAL_GOODS = frozenset({})
 
 def _filter_recipes_by_config() -> list[Recipe]:
     """Filter recipes based on SimConfig settings."""

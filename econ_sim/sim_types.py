@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import deque
+
 
 class Good(str, Enum):
     FOOD = "food"
@@ -29,7 +30,7 @@ class Action:
     recipe: Recipe | None = None
     quantity: int = 0
 
-@dataclass #(frozen=True)
+@dataclass
 class Recipe:
     name: str
     inputs: dict[Good, int]
@@ -72,14 +73,6 @@ class TradeRecord:
 
 
 @dataclass
-class CounterpartyMemory:
-    """Short memory of recent trades with a counterparty."""
-    agent_id: int
-    trade_count: int = 0
-    last_tick: int = 0
-    trust: float = 0.5
-
-@dataclass
 class InventoryLot:
     good: Good
     quantity: int
@@ -100,12 +93,10 @@ class AgentState:
     self_reliance: float
     inventory: dict[Good, int] = field(default_factory=lambda: {g: 0 for g in Good})
     skills: dict[SkillDomain, float] = field(default_factory=dict)
-    memory: dict[int, CounterpartyMemory] = field(default_factory=dict)
     last_recipe: str | None = None
     recipe_counts: dict[str, int] = field(default_factory=dict)
     lots: list[InventoryLot] = field(default_factory=list)
     
-    current_recipe: Recipe | None = None # current recipe being executed
     alive: bool = True
     has_shelter: bool = False
 
@@ -115,11 +106,8 @@ class AgentState:
     comfort_debt: float = 0.0
 
     recent_recipes: deque[str] = field(default_factory=deque)
-    unmet_shortage_streak: dict[Good, int] = field(default_factory=dict)
 
     def inventory_of(self, good: Good) -> int:
-        if good == Good.TOOLS:
-            return len([lot for lot in self.lots if lot.good == Good.TOOLS])
         return self.inventory.get(good, 0)
 
 @dataclass
@@ -130,9 +118,6 @@ class AgentArchetype:
     self_reliance_range: tuple[float, float] = (0.7, 1.2)   # defaults match current global range
     novice_penalty_exponent: float = 1.3
     profit_motivation: float = 0.8
-    exploration_drive: float = 0.5 # 0 is no openness/pure profit, 1 is testing everything
-    risk_tolerance: float = 0 # low risk tolerance (0) means agent panics earlier due to shortages
-    time_preference: float = 0.5 # 0 is myopic, 1 is planning a long time ahead
 
 ARCHETYPES: dict[str, AgentArchetype] = {
     "generalist": AgentArchetype(name="generalist"),

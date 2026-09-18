@@ -75,38 +75,38 @@ class WealthDistributionReport:
 
         lines = [
             "Wealth Distribution",
-            f"  {'n':>4} {'total':>12} {'mean':>10} {'median':>10} "
-            f"{'stdev':>10} {'CV':>7}",
-            f"  {self.n:>4} {self.total_wealth:>12,.2f} {self.mean:>10,.2f} "
+            (f"  {'n':>4} {'total':>12} {'mean':>10} {'median':>10} "
+            f"{'stdev':>10} {'CV':>7}"),
+            (f"  {self.n:>4} {self.total_wealth:>12,.2f} {self.mean:>10,.2f} "
             f"{self.median:>10,.2f} {self.stdev:>10,.2f} "
-            f"{self.coefficient_of_variation:>7.2f}",
+            f"{self.coefficient_of_variation:>7.2f}"),
             "",
-            f"  {'percentile':<12} {'P10':>9} {'P25':>9} {'P50':>9} "
-            f"{'P75':>9} {'P90':>9} {'P99':>9}",
-            f"  {'wealth':<12} {self.p10:>9,.2f} {self.p25:>9,.2f} "
+            (f"  {'percentile':<12} {'P10':>9} {'P25':>9} {'P50':>9} "
+            f"{'P75':>9} {'P90':>9} {'P99':>9}"),
+            (f"  {'wealth':<12} {self.p10:>9,.2f} {self.p25:>9,.2f} "
             f"{self.p50:>9,.2f} {self.p75:>9,.2f} "
-            f"{self.p90:>9,.2f} {self.p99:>9,.2f}",
+            f"{self.p90:>9,.2f} {self.p99:>9,.2f}"),
             "",
             f"  {'spread':<12} {'P90/P10':>10} {'P90/P50':>10} {'P50/P10':>10}",
-            f"  {'ratio':<12} {ratio(self.p90_p10_ratio):>10} "
-            f"{ratio(self.p90_p50_ratio):>10} {ratio(self.p50_p10_ratio):>10}",
+            (f"  {'ratio':<12} {ratio(self.p90_p10_ratio):>10} "
+            f"{ratio(self.p90_p50_ratio):>10} {ratio(self.p50_p10_ratio):>10}"),
             "",
-            f"  {'wealth share':<16} {'top 1%':>10} {'top 10%':>10} "
-            f"{'bottom 10%':>12} {'bottom 50%':>12} {'Palma':>10}",
-            f"  {'share':<16} {pct(self.top_1pct_share):>10} "
+            (f"  {'wealth share':<16} {'top 1%':>10} {'top 10%':>10} "
+            f"{'bottom 10%':>12} {'bottom 50%':>12} {'Palma':>10}"),
+            (f"  {'share':<16} {pct(self.top_1pct_share):>10} "
             f"{pct(self.top_10pct_share):>10} "
             f"{pct(self.bottom_10pct_share):>12} "
             f"{pct(self.bottom_50pct_share):>12} "
-            f"{ratio(self.palma_ratio):>10}",
+            f"{ratio(self.palma_ratio):>10}"),
             "",
-            f"  {'inequality':<16} {'Theil':>10} {'Atkinson .5':>12} "
-            f"{'Atkinson 1.0':>12}",
-            f"  {'index':<16} {self.theil_index:>10.4f} "
-            f"{self.atkinson_0_5:>12.4f} {self.atkinson_1_0:>12.4f}",
+            (f"  {'inequality':<16} {'Theil':>10} {'Atkinson .5':>12} "
+            f"{'Atkinson 1.0':>12}"),
+            (f"  {'index':<16} {self.theil_index:>10.4f} "
+            f"{self.atkinson_0_5:>12.4f} {self.atkinson_1_0:>12.4f}"),
             "",
             f"  {'shape':<16} {'skewness':>10} {'excess kurtosis':>18}",
-            f"  {'value':<16} {self.skewness:>10.2f} "
-            f"{self.excess_kurtosis:>18.2f}",
+            (f"  {'value':<16} {self.skewness:>10.2f} "
+            f"{self.excess_kurtosis:>18.2f}"),
             "",
             f"  {'poverty threshold':<22} {'share':>10}",
             f"  {'< 50% median':<22} {pct(self.share_below_50pct_median):>10}",
@@ -131,7 +131,7 @@ def _percentile(sorted_vals: list[float], pct: float) -> float:
     if n == 1:
         return sorted_vals[0]
     idx = (pct / 100) * (n - 1)
-    lo = int(math.floor(idx))
+    lo = math.floor(idx)
     hi = min(lo + 1, n - 1)
     frac = idx - lo
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac
@@ -143,8 +143,8 @@ def _share_of(sorted_vals: list[float], total: float, start_pct: float, end_pct:
     n = len(sorted_vals)
     if n == 0 or total == 0:
         return 0.0
-    lo = max(0, min(int(round(n * start_pct / 100)), n))
-    hi = max(lo, min(int(round(n * end_pct / 100)), n))
+    lo = max(0, min(round(n * start_pct / 100), n))
+    hi = max(lo, min(round(n * end_pct / 100), n))
     return sum(sorted_vals[lo:hi]) / total
 
 

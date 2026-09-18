@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -57,11 +57,9 @@ class EventLog:
         """Full history for a single agent (as actor or counterparty)."""
         result: list[Event] = []
         for e in self._events:
-            if e.agent_id == agent_id:
+            if e.agent_id == agent_id or (
+                e.event_type == EventType.TRADE and e.data.get("buyer_id") == agent_id or e.data.get("seller_id") == agent_id):
                 result.append(e)
-            elif e.event_type == EventType.TRADE:
-                if e.data.get("buyer_id") == agent_id or e.data.get("seller_id") == agent_id:
-                    result.append(e)
         return result
 
     def events_of_type(self, event_type: EventType) -> list[Event]:

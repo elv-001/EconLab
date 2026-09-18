@@ -1,10 +1,12 @@
+import itertools
+import json
 from contextlib import contextmanager
 from dataclasses import replace
+
 from econ_sim.config import DEFAULT_CONFIG, RECIPE_BY_NAME
 from econ_sim.run import run_once
 from econ_sim.sim_types import Good
-import itertools
-import json
+
 
 def evaluate_run(summary: dict) -> dict:
     survival_rate = summary["agents_alive"] / 80

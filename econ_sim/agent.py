@@ -72,13 +72,6 @@ class Agent:
     def agent_id(self) -> int:
         return self.state.agent_id
 
-    @property
-    def tools_count(self) -> int:
-        return sum(
-            1 for lot in self.state.lots
-            if lot.good == Good.TOOLS and (lot.uses_remaining or 0) > 0
-        )
-
     # ------------------------------------------------------------------
     # Main planning entry point
     # ------------------------------------------------------------------
@@ -87,7 +80,7 @@ class Agent:
         shadow = self.compute_shadow_values(market_prices)
 
         # 1. Generate all feasible actions
-        actions = self._generate_actions(market_prices)
+        actions = self._generate_actions(market_prices, tick)
 
         # 2. Score them
         scored = [(a, self._value_action(a, tick, market_prices, shadow)) for a in actions]
@@ -151,7 +144,7 @@ class Agent:
                 weights = [max(0.01, v - min(v2 for _, v2 in top_n) + 0.01) for _, v in top_n]
                 best_prod, best_prod_val = self.rng.choices(top_n, weights=weights, k=1)[0]
 
-            if best_prod_val > getattr(self.config, "produce_value_threshold", -1.0):
+            if best_prod_val > getattr(self.config, "produce_value_threshold",-1):
                 self.state.current_production_action = best_prod
             else:
                 self.state.current_production_action = Action(ActionType.HOLD)
@@ -180,7 +173,7 @@ class Agent:
         #    to the front so the agent actually tries to acquire them this tick
         prod = self.state.current_production_action
 
-        if prod.action_type == ActionType.PRODUCE and prod.recipe:
+        if prod and prod.action_type == ActionType.PRODUCE and prod.recipe:
             for good, qty in prod.recipe.inputs.items():
                 if good not in TRADEABLE_GOODS:
                     continue
@@ -194,7 +187,7 @@ class Agent:
     # ------------------------------------------------------------------
     # Action generation
     # ------------------------------------------------------------------
-    def _generate_actions(self, market_prices: dict[Good, float]) -> list[Action]:
+    def _generate_actions(self, market_prices: dict[Good, float], tick: int) -> list[Action]:
         actions = [Action(ActionType.HOLD)]
 
         # Production – include any recipe that is affordable OR can be made affordable by buying
@@ -208,7 +201,7 @@ class Agent:
         # Buys
         for good in TRADEABLE_GOODS:
             if self.state.money > 0:
-                qty = self._desired_buy_quantity(good)
+                qty = self._desired_buy_quantity(good, market_prices)
                 if qty > 0:
                     actions.append(Action(ActionType.BUY, good=good, quantity=qty))
 
@@ -294,10 +287,10 @@ class Agent:
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
         for good, qty in recipe.inputs.items():
-            have = self.tools_count if good == Good.TOOLS else self.state.inventory_of(good)
+            have = self.state.inventory_of(good)
             owned = min(have, qty)
             missing = qty - owned
-            in_cost += self._input_cost(good, owned, market_prices) * 0.4       # opportunity cost of using owned
+            in_cost += self._sell_price(good, market_prices) * owned    # opportunity cost of using owned
             if missing > 0:
                 in_cost += self._buy_price(good, market_prices) * missing   # cash cost of buying
 
@@ -317,6 +310,25 @@ class Agent:
 
         if Good.FOOD not in recipe.outputs:
             net -= self._survival_penalty(tick)
+
+        for good in recipe.outputs:
+            rate = self.expected_sell_rate.get(good, 1.0)
+            if rate < 0.7:
+                net *= (0.6 + 0.4 * rate)   # scales down when the agent cannot sell
+
+        skill = self.state.skills[recipe.domain]
+        if skill > 1.3:
+            net *= 1.0 + 0.35 * (skill - 1.0)
+
+        # in _value_produce, after computing net:
+        recent = list(self.state.recent_recipes)[-5:]
+        if recent:
+            current_domain_streak = Counter(RECIPE_BY_NAME[r].domain for r in recent)
+            if recipe.domain in current_domain_streak:
+                # small continuity bonus for the domain you've actually been doing —
+                # represents real switching friction (tooling up, momentum, local knowledge)
+                # without telling the agent what to specialize in
+                net *= 1.0 + 0.1 * current_domain_streak[recipe.domain]
 
         return net
 
@@ -368,7 +380,7 @@ class Agent:
             currently_needed = prod.recipe.inputs[good]
 
         idle = max(0, self.state.inventory_of(good) - currently_needed)
-        idle_factor = 1.0 / (1.0 + 1.5 * idle)
+        idle_factor = 1.0 / (1.0 + 2 * idle)
 
         # 2. Conservative hold value for sale decisions.
         #    We largely ignore the optimistic multi-hop shadow.
@@ -431,21 +443,35 @@ class Agent:
 
         base = self.config.base_prices().get(good, 1.0)
         price_ratio = min(1.0, self._expected_price(good, market_prices) / base)
-        shad = qty * shadow.get(good, self._expected_price(good, market_prices)) * price_ratio
+        shad = qty * shadow.get(good, self._expected_price(good, market_prices))
 
-        #shad = qty * shadow.get(good, self._expected_price(good, market_prices))
+        if price_ratio < 0.6:
+            discount = 0.55 + 0.45 * (price_ratio / 0.6)
+            resale *= discount
+            shad  *= discount
+        return need + max(resale, shad)
 
         # Personal glut: if I'm already holding far more of this than I can
         # realistically sell or use, each additional unit is worth less to me —
         # regardless of what the population-average market price says.
-        #targets = self.config.targets()
-        #if good in targets and targets[good] > 0:
-         #   owned = self.state.inventory_of(good)
-          #  glut = owned / max(1, targets[good])
-           # personal_discount = 1.0 / (1.0 + 0.3 * max(0.0, glut - 1.0))
-            #resale *= personal_discount
-            #shad *= personal_discount
 
+        """
+        reasonable = self.config.reasonable_stock(good)
+
+        if reasonable > 0:
+            owned = self.state.inventory_of(good)
+            glut = owned / reasonable
+
+            surplus = max(0.0, glut - 1.0)
+
+            personal_discount = 1.0 / (
+                1.0 + 0.1 * surplus ** 2
+            )
+
+            resale *= personal_discount
+            shad *= personal_discount
+        """
+            
         return need + max(resale, shad)
 
     def _need_value(self, good: Good, qty: int, tick: int) -> float:
@@ -485,21 +511,23 @@ class Agent:
             return market_prices[good]
         return self.config.base_prices().get(good, 1.0)
 
-    def _buy_price(self, good: Good, market_prices: dict[Good, float] | None) -> float:
+    def _buy_price(self, good, market_prices):
         base = self._expected_price(good, market_prices)
-        # Mild urgency premium when we have an active production that needs it
         urgency = 0.0
-        prod = self.state.current_production_action
-        if (prod and prod.action_type == ActionType.PRODUCE and prod.recipe
-                and good in prod.recipe.inputs and self._missing(good, prod.recipe.inputs[good]) > 0):
-            urgency = 0.6
+        if good != Good.FOOD:  # food's urgency is already reflected in _need_value + market backlog pricing
+            prod = self.state.current_production_action
+            if (prod and prod.action_type == ActionType.PRODUCE and prod.recipe
+                    and good in prod.recipe.inputs and self._missing(good, prod.recipe.inputs[good]) > 0):
+                urgency = 0.6
         return max(0.05, base * (1.0 + urgency))
 
-    def _sell_price(self, good: Good, market_prices: dict[Good, float] | None) -> float:
+    def _sell_price(self, good, market_prices):
         base = self._expected_price(good, market_prices)
         surplus = self._surplus(good)
-        discount = min(0.75, 0.04 * surplus)
-        return max(0.2 * base, base * (1.0 - discount))
+        reasonable = max(1, self.config.reasonable_stock(good))
+        glut_ratio = surplus / reasonable
+        discount = min(0.9, 0.04 * surplus + 0.05 * max(0, glut_ratio - 1))
+        return max(0.1 * base, base * (1.0 - discount))
 
     def _input_cost(self, good: Good, qty: int, market_prices: dict[Good, float]) -> float:
         if qty <= 0:
@@ -509,14 +537,19 @@ class Agent:
             price /= max(1, self.config.tool_max_uses)
         return price * qty
 
-    def _desired_buy_quantity(self, good: Good) -> int:
+    def _desired_buy_quantity(self, good: Good, market_prices: dict[Good, float]) -> int:
         if good == Good.FOOD:
             target = self.config.target_food + self.config.food_consumption_per_tick
-            return max(0, target - self.state.inventory_of(Good.FOOD))
-        if good == Good.CLOTHES and self.config.clothing_enabled:
-            return max(0, self.config.target_clothes - self.state.inventory_of(Good.CLOTHES))
-        # For capital / intermediate goods we buy modestly
-        return 1
+            return max(1, target - self.state.inventory_of(Good.FOOD))
+        if good == Good.CLOTHES:
+            return max(1, self.config.target_clothes - self.state.inventory_of(Good.CLOTHES))
+        # Capital/intermediate goods: buy more when cheap relative to base
+        base = self.config.base_prices().get(good, 1.0)
+        price = self._expected_price(good, market_prices)
+        # simplest version: just scale desired qty inversely with price ratio
+        target = self.config.reasonable_stock(good)
+        have = self.state.inventory_of(good)
+        return max(1, target - have) if have < target else 1
 
     def _desired_sell_quantity(self, good: Good) -> int:
         return max(0, self._surplus(good))
@@ -538,8 +571,6 @@ class Agent:
         return max(0, inv - reserve)
 
     def _missing(self, good: Good, qty: int) -> int:
-        if good == Good.TOOLS:
-            return max(0, qty - self.tools_count)
         return max(0, qty - self.state.inventory_of(good))
 
     # ------------------------------------------------------------------
@@ -588,7 +619,7 @@ class Agent:
 
     # STORAGE CARRYING COST
     def _excess_inventory(self, good: Good) -> int:
-        owned = self.tools_count if good == Good.TOOLS else self.state.inventory_of(good)
+        owned = self.state.inventory_of(good)
         return max(0, owned - self.config.reasonable_stock(good))
 
     # ------------------------------------------------------------------
@@ -662,7 +693,7 @@ class Agent:
     def can_afford_recipe(self, recipe: Recipe) -> bool:
         for good, qty in recipe.inputs.items():
             if good == Good.TOOLS:
-                if self.tools_count < qty:
+                if self._get_tool_uses_left() < qty:
                     return False
             else:
                 if self.state.inventory_of(good) < qty:
@@ -782,6 +813,11 @@ class Agent:
         surviving = []
         food_decay = getattr(self.config, "food_shelf_life_enabled", True)
         for lot in self.state.lots:
+            if lot.good == Good.TOOLS:
+                self._depreciate_tools(lot, current_tick)
+                if lot.uses_remaining and lot.uses_remaining > 0:
+                    surviving.append(lot)
+                continue
             if lot.shelf_life is None:
                 surviving.append(lot)
                 continue
@@ -795,6 +831,32 @@ class Agent:
         self.state.lots = surviving
         self._sync_inventory()
         return dict(spoiled)
+
+    def _depreciate_tools(self, lot: InventoryLot, current_tick: int):
+        if lot.good != Good.TOOLS or lot.uses_remaining is None:
+            return
+
+        # how old is this tool
+        age = max(0, current_tick - lot.created_tick)
+
+        wear_rate = min(
+            1.0,
+            age / self.config.tool_max_lifespan,
+        )
+        expected_uses_remaining = self.config.tool_max_uses * (1 - wear_rate)
+
+        # if tool has been sitting for a long time without usage, wear it down
+        if lot.uses_remaining > expected_uses_remaining:
+            num_uses = math.floor(
+                lot.uses_remaining - expected_uses_remaining
+            )
+
+            if num_uses > 0:
+                lot.uses_remaining -= num_uses
+
+    def _get_tool_uses_left(self) -> int:
+        lots = [lot for lot in self.state.lots if lot.good == Good.TOOLS]
+        return sum(lot.uses_remaining for lot in lots if lot.uses_remaining)
 
     # ------------------------------------------------------------------
     # Learning & productivity
@@ -833,7 +895,7 @@ class Agent:
 
         # Mild decay of unused skills
         for domain, skill in list(self.state.skills.items()):
-            if domain == recipe.domain:
+            if domain == recipe.domain or domain == SkillDomain.GATHERING:
                 continue
             floor = 1
             last = self._last_used(domain)
@@ -865,6 +927,14 @@ class Agent:
         old = self.expected_sell_rate.get(good, 1.0)
         alpha = self.config.price_ema_alpha
         self.expected_sell_rate[good] = max(0.4, (1 - alpha) * old + alpha * realized)
+
+    def decay_sell_rate_belief(self) -> None:
+        """Beliefs about market conditions should get less confident over time
+        if untested, so a stale 'nobody's buying this' assumption doesn't persist
+        forever once an agent stops trying to sell."""
+        for good in TRADEABLE_GOODS:
+            old = self.expected_sell_rate.get(good, 1.0)
+            self.expected_sell_rate[good] = old + 0.01 * (1.0 - old)
 
     def consume_food(self, tick: int) -> int:
         needed = self.config.food_consumption_per_tick

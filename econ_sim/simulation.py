@@ -23,8 +23,10 @@ class Simulation:
     agents: list[Agent] = field(default_factory=list)
     tick: int = 0
     snapshots: list[TickSnapshot] = field(default_factory=list)
+
     _last_prices: dict[Good, float] = field(default_factory=dict)
     _last_congestion: dict[str, float] = field(default_factory=dict)
+
     _initial_total_money: float = 0.0
     all_trades: list[TradeRecord] = field(default_factory=list)
 
@@ -98,6 +100,27 @@ class Simulation:
             },
         )
 
+        """
+        for a in self.agents:
+            if a.state.skills[SkillDomain.WEAVING] > 1.4:
+                shadow = a.compute_shadow_values(self._last_prices)
+                farm_v = a._value_produce(RECIPE_BY_NAME["farm"], self.tick, self._last_prices, shadow)
+                weave_v = a._value_produce(RECIPE_BY_NAME["weave_cloth"], self.tick, self._last_prices, shadow)
+                can_farm = a._can_attempt(RECIPE_BY_NAME["farm"], self._last_prices)
+                can_weave = a._can_attempt(RECIPE_BY_NAME["weave_cloth"], self._last_prices)
+                print(f"agent={a.agent_id} weave_skill={a.state.skills[SkillDomain.WEAVING]:.2f} "
+                    f"farm_val={farm_v:.2f} weave_val={weave_v:.2f} "
+                    f"can_farm={can_farm} can_weave={can_weave} "
+                    f"fiber={a.state.inventory_of(Good.FIBER)} tools={a.state.inventory_of(Good.TOOLS)} money={a.state.money:.2f}")
+                break  # just one agent, every tick, for ~20 ticks
+                """
+
+        specialists = [a for a in self.agents if a.primary_activity() in ("craft_tools", "weave_cloth")]
+        subsistence = [a for a in self.agents if a.primary_activity() in ("farm", "forage")]
+        #print(f"Specialists: {len(specialists)}, Subsistence: {len(subsistence)}")
+        #if specialists and subsistence:
+         #   print("specialist median wealth:", statistics.median(a.total_wealth(self._last_prices) for a in specialists))
+         #   print("subsistence median wealth:", statistics.median(a.total_wealth(self._last_prices) for a in subsistence))
         self.tick += 1
         if self.tick == 499:
             craft_counts = sorted((a.state.recipe_counts.get("craft_tools", 0) for a in self.agents), reverse=True)
@@ -123,11 +146,6 @@ class Simulation:
                 and a.state.current_recipe.name == "craft_tools"
             ]
 
-            print(
-                "tool producer inventory:",
-                sum(a.state.inventory_of(Good.TOOLS) for a in tool_producers)
-)
-
             print("total tools in inventory:", total_tools)
             print("total wood:", total_wood)
             print("total clothes in inventory", sum(
@@ -138,7 +156,7 @@ class Simulation:
                             a.state.inventory_of(Good.FIBER)
                             for a in self.agents
                         ))
-        if self.tick == 999:
+        if self.tick == 1499:
             
             wealth_by_role = defaultdict(list)
             money_by_role = defaultdict(list)
@@ -227,7 +245,7 @@ class Simulation:
         totals: dict[str, int] = defaultdict(int)
         choices = Counter()
         e=0
-        tool_uses = 0
+        tool_uses = 0 
         clothes_produced = 0
 
         for agent in self.agents:
@@ -274,6 +292,16 @@ class Simulation:
         self.total_tool_use += tool_uses
 
         #print(f"Fallback: {e}")
+        tools_per_agent = sorted(a.state.inventory_of(Good.CLOTHES) for a in self.agents)
+        #print("clothes distribution:", tools_per_agent[:5], "...", tools_per_agent[-5:])
+        richest = sorted(
+            self.agents,
+            key=lambda a: a.state.inventory_of(Good.CLOTHES),
+        )
+        #print("poorest 5:", [
+         #   (a.state.money, a.state.inventory_of(Good.CLOTHES))
+         #   for a in richest[:5]
+        #])
 
         #for recipe, count in choices.items():
          #   print(f"{recipe}: {count} agent(s)")
@@ -367,8 +395,7 @@ class Simulation:
         sold_by_ask_id: dict[int, int] = defaultdict(int)
 
         tool_total = 0
-        ordered_trades = sorted(result.trades, key=lambda t: 0 if t.good == Good.FOOD else 1)
-        for trade in ordered_trades:
+        for trade in result.trades:
             buyer = agent_map[trade.buyer_id]
             seller = agent_map[trade.seller_id]
             cost = trade.price * trade.quantity
@@ -400,7 +427,7 @@ class Simulation:
                     + trade.quantity * trade.price
                 )
 
-            if trade.good == Good.TOOLS:
+            if trade.good == Good.CLOTHES:
                 tool_total += 1
 
             self.event_log.record(
@@ -427,13 +454,14 @@ class Simulation:
             self._update_price_from_book(
                 good, 
                 [o for o in bids if o.good == good],
-                [o for o in asks if o.good == good]
+                [o for o in asks if o.good == good],
+                result.trades
             )
 
         if self.config.check_invariants:
             self._check_invariants(result.trades)
 
-        #print(f"TOOLS TRADED: {tool_total}")
+        #print(f"CLOTHES TRADED: {tool_total}")
 
         return result.trades
 
@@ -452,41 +480,52 @@ class Simulation:
             self._congestion_ema[name] = (1 - alpha) * prev + alpha * raw.get(name, 0.0)
         self._last_congestion = self._congestion_ema
 
-    def _update_price_from_book(self, good: Good, bids: list[Order], asks: list[Order]) -> None:
-        bid_qty = sum(o.quantity for o in bids if o.good == good)
-        ask_qty = sum(o.quantity for o in asks if o.good == good)
-        if bid_qty + ask_qty == 0:
-            return
-
+    def _update_price_from_book(self, good, bids, asks, trades):
         base = self.config.base_prices()[good]
         prev = self._last_prices.get(good, base)
+        reversion = 0.05
 
-        flow_imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty)
+        good_trades = [t for t in trades if t.good == good]
+        filled_qty = sum(t.quantity for t in good_trades)
+        ask_qty = sum(o.quantity for o in asks if o.good == good)
+        bid_qty = sum(o.quantity for o in bids if o.good == good)
 
-        # Stock overhang sets a price LEVEL relative to base — not a repeated
-        # cut on the already-adjusted previous price. This is what keeps it
-        # from compounding into a runaway spiral.
-        stock_multiplier = 1.0
-        targets = self.config.targets()
-        if good in targets and targets[good] > 0:
-            total_stock = sum(a.state.inventory_of(good) for a in self.agents)
-            healthy_stock = len(self.agents) * targets[good]
-            overhang = total_stock / max(1, healthy_stock)
-            stock_multiplier = 1.0 / (1.0 + 0.3 * max(0.0, overhang - 1.0))
+        # Confidence scaling: don't let a handful of orders produce a maximal signal.
+        # Ramps from 0 at near-zero volume to 1 once order flow is reasonably deep.
+        min_confident_qty = max(5, self.config.num_agents * 0.05)
+        ask_confidence = min(1.0, ask_qty / min_confident_qty)
+        bid_confidence = min(1.0, bid_qty / min_confident_qty)
 
-        target_price = base * stock_multiplier * (1.0 + 0.15 * flow_imbalance)
+        unfilled_ask = max(0, ask_qty - filled_qty)
+        unfilled_bid = max(0, bid_qty - filled_qty)
+        ask_backlog = (unfilled_ask / ask_qty * ask_confidence) if ask_qty > 0 else 0.0
+        bid_backlog = (unfilled_bid / bid_qty * bid_confidence) if bid_qty > 0 else 0.0
+
+        if good_trades:
+            vwap = sum(t.price * t.quantity for t in good_trades) / filled_qty
+            anchor = (1 - reversion) * vwap + reversion * base
+        elif bid_qty + ask_qty > 0:
+            flow_imbalance = (bid_qty - ask_qty) / (bid_qty + ask_qty)
+            momentum = prev * (1.0 + 0.15 * flow_imbalance)
+            anchor = (1 - reversion) * momentum + reversion * base
+        else:
+            return
+
+        pressure = 1.0 - 0.3 * ask_backlog + 0.10 * bid_backlog  # asymmetric per last message
+        target_price = anchor * pressure
 
         lo = base * self.config.price_clamp_min_factor
         hi = base * self.config.price_clamp_max_factor
         target_price = max(lo, min(hi, target_price))
 
-        alpha = self.config.price_ema_alpha
-        self._last_prices[good] = (1 - alpha) * prev + alpha * target_price
+        self._last_prices[good] = (1 - self.config.price_ema_alpha) * prev + self.config.price_ema_alpha * target_price
 
     def _phase_housekeeping(self, trades: list[TradeRecord]) -> None:
         for agent in self.agents:
+            agent.state.money = max(1, agent.state.money)
             consumed = agent.consume_food(self.tick)
             agent.decay_inventory(self.tick)
+            agent.decay_sell_rate_belief()
             if consumed > 0:
                 self.event_log.record(
                     self.tick,

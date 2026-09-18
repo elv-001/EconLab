@@ -75,6 +75,7 @@ class SimConfig:
     # SimConfig
     tool_max_uses: int = 5   # a tool survives this many farm cycles
     tool_break_chance: float = 0.1  # optional: random breakage instead of/alongside fixed uses
+    tool_max_lifespan: int = 50
 
     # Bounded rationality: pick randomly among top-N scored recipes
     production_top_n: int = 3
@@ -84,9 +85,9 @@ class SimConfig:
     skill_productivity_cap: float = 1.9
     skill_productivity_base: float = 1.0
     skill_gain_decay_exponent: float = 3
-    skill_decay_per_tick: float = 0.01
+    skill_decay_per_tick: float = 0.05
 
-    skill_decay_grace_period: int = 15
+    skill_decay_grace_period: int = 5
 
     # Trade memory
     memory_decay_ticks: int = 50
@@ -142,18 +143,13 @@ class SimConfig:
         return result
 
     def reasonable_stock(self, good: Good) -> int:
-        """How much of this good is actually useful to hold onto.
-        Consumption goods: their target. Intermediate/capital goods: a small
-        working buffer based on the largest single recipe's requirement.
-        No good needs a hand-picked category — this falls out of existing data."""
-
         targets = self.targets()
-        if good in targets:
-            return targets[good]
+        base = targets.get(good, 0)
         max_input = max((r.inputs.get(good, 0) for r in RECIPES), default=0)
         if max_input == 0:
-            return 0  # not used as an input anywhere — no carrying cost applies
-        return max_input * 2  # ~2 recipe-calls worth of buffer, not zero, not unlimited
+            return base
+        horizon = 10  # ticks of population-wide supply a specialist should be allowed to hold
+        return max(base, max_input * horizon)
 
 # ARCHETYPE MIX
 ARCHETYPE_MIX: dict[str, float] = {
@@ -189,13 +185,13 @@ ALL_RECIPES: list[Recipe] = [
     ),
     Recipe(name="gather_fiber", 
            inputs={}, 
-           outputs={Good.FIBER: 1},
+           outputs={Good.FIBER: 2},
            domain=SkillDomain.HARVESTING, 
            min_skill=1.0, 
     ),
     Recipe(name="weave_cloth", 
-           inputs={Good.FIBER: 2, Good.TOOLS: 1}, 
-           outputs={Good.CLOTHES: 6},
+           inputs={Good.FIBER: 3, Good.TOOLS: 1}, 
+           outputs={Good.CLOTHES: 5},
            domain=SkillDomain.WEAVING, 
            min_skill=1.4,
     ),

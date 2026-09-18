@@ -105,7 +105,6 @@ class AgentState:
     recipe_counts: dict[str, int] = field(default_factory=dict)
     lots: list[InventoryLot] = field(default_factory=list)
     
-    current_goal: Good | Goal | None = None
     current_recipe: Recipe | None = None # current recipe being executed
     alive: bool = True
     has_shelter: bool = False

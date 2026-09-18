@@ -66,3 +66,4 @@ amplifying both skill & affinity seems to have helped
 
 but now no bids being made cuz pricing cant understand the huge supply
 Producing gives positive utility; owning inventory is almost free.
+some mfs are hoarding

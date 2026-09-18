@@ -117,7 +117,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
         skill_medians[f"skill_median_{domain.value}"] = statistics.median(vals) if vals else 0.0
 
     # --- capital-good health checks ---
-    total_tools = sum(a.tools_count for a in agents)
+    total_tools = sum(a.state.inventory_of(Good.TOOLS) for a in agents)
     total_wood = sum(a.state.inventory_of(Good.WOOD) for a in agents)
     total_fiber = sum(a.state.inventory_of(Good.FIBER) for a in agents)
     total_clothes = sum(a.state.inventory_of(Good.CLOTHES) for a in agents)
@@ -135,7 +135,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
         "agents_alive": n_alive,
         "death_rate": death_rate,
         "gini_end": gini_end,
-        "avg_money_end": statistics.mean(a.state.money for a in agents) if agents else 0.0,
+        "median_money_end": statistics.median(a.state.money for a in agents) if agents else 0.0,
         "food_per_capita": (
             sum(a.state.inventory_of(Good.FOOD) for a in agents) / max(1, n_alive)
         ),

@@ -21,7 +21,7 @@ class TickSnapshot:
     gini: float = 0.0
     last_action: dict[str, int] = field(default_factory=dict)
     specialization: dict[str, int] = field(default_factory=dict)
-    avg_money: float = 0.0
+    median_money: float = 0.0
     total_money: float = 0.0
     food_per_capita: float = 0.0
     agents_alive: int = 0
@@ -121,7 +121,7 @@ def compute_tick_snapshot(
         gini=round(gini_coefficient(wealths), 4),
         last_action=compute_last_action(agents),
         specialization=compute_specializations(agents),
-        avg_money=round(sum(money_values) / len(money_values), 2) if money_values else 0,
+        median_money=round(statistics.median([agent.state.money for agent in agents]), 2),
         total_money=round(sum(money_values), 2),
         food_per_capita=round(food_per_capita, 2),
         agents_alive = len(agents)
@@ -151,7 +151,7 @@ class SimReport:
             "gini_end": last.gini,
             "specialization_end": last.specialization,
             "prices_end": last.prices,
-            "avg_money_end": last.avg_money,
+            "median_money_end": last.median_money,
             "food_per_capita": last.food_per_capita,
             "agents_alive": last.agents_alive,
             "skill_distribution": self.skill_distribution(),

@@ -69,9 +69,14 @@ def print_summary(report: SimReport) -> None:
     print("-" * 72)
     print("Summary")
     for k, v in summary.items():
-        if k in ("skill_distribution", "wealth_by_archetype", "roles_by_archetype"):
+        if k in ("skill_distribution", "wealth_by_archetype", "roles_by_archetype", "wealth_distribution"):
             continue
         print(f"  {k}: {v}")
+
+    wealth_distribution = summary.get("wealth_distribution")
+    if wealth_distribution:
+        print("")
+        print(wealth_distribution)
 
     # Skill distribution
     print("\nSkill Distribution")

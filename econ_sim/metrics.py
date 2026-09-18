@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from econ_sim.agent import Agent
 from econ_sim.config import SimConfig, TRADEABLE_GOODS
 from econ_sim.sim_types import Good, TradeRecord
+from econ_sim.wealth_distribution import wealth_distribution_report
 
 
 @dataclass
@@ -158,10 +159,17 @@ class SimReport:
         }
 
         if include_archetypes and self._agents is not None and self._prices is not None:
+            result["wealth_distribution"] = self.wealth_distribution()
             result["wealth_by_archetype"] = self.wealth_by_archetype()
             result["roles_by_archetype"] = self.role_by_archetype()
 
         return result
+
+    def wealth_distribution(self):
+        if self._agents is None:
+            return {}
+        report = wealth_distribution_report([agent.total_wealth(self._prices) for agent in self._agents])
+        return report.format_report()
 
     def skill_distribution(self) -> dict[str, dict]:
         by_domain: dict[str, list[float]] = defaultdict(list)

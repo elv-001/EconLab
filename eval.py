@@ -100,7 +100,6 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
     for a in agents:
         role = a.primary_activity() or "none"
         spec_counts[role] = spec_counts.get(role, 0) + 1
-    print(spec_counts)
 
     def share(name: str) -> float:
         return spec_counts.get(name, 0) / max(1, n_alive)
@@ -120,6 +119,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
     total_wood = sum(a.state.inventory_of(Good.WOOD) for a in agents)
     total_fiber = sum(a.state.inventory_of(Good.FIBER) for a in agents)
     total_clothes = sum(a.state.inventory_of(Good.CLOTHES) for a in agents)
+    total_shelter = sum(a.state.has_shelter for a in agents)
 
     # --- sell-rate health (are markets actually clearing, or seized) ---
     def avg_sell_rate(good: Good) -> float:
@@ -134,6 +134,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
         "agents_alive": n_alive,
         "death_rate": death_rate,
         "gini_end": gini_end,
+        "total_trades": len(sim.all_trades),
         "median_money_end": statistics.median(a.state.money for a in agents) if agents else 0.0,
         "food_per_capita": (
             sum(a.state.inventory_of(Good.FOOD) for a in agents) / max(1, n_alive)
@@ -142,6 +143,7 @@ def extract_metrics(sim: Simulation) -> dict[str, float]:
         "total_wood": total_wood,
         "total_fiber": total_fiber,
         "total_clothes": total_clothes,
+        "total_shelter": total_shelter,
         "sell_rate_food": avg_sell_rate(Good.FOOD),
         "sell_rate_tools": avg_sell_rate(Good.TOOLS),
         "sell_rate_fiber": avg_sell_rate(Good.FIBER),

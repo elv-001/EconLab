@@ -53,18 +53,11 @@ Fix:
 ## Baseline
 This was the stable v1 baseline run:
 
-Summary
-  ticks_run: 500
-  total_trades: 38496
-  gini_start: 0.129
-  gini_end: 0.3319
-  specialization_end: {'farm': 45, 'gather_fiber': 26, 'weave_cloth': 2, 'forage': 1, 'chop_wood': 5, 'craft_tools': 1}
-  prices_end: {'food': 1.09, 'wood': 0.73, 'tools': 1.08, 'fiber': 0.92, 'clothes': 1.63}
-  median_money_end: 23.88
-  food_per_capita: 14.11
-  agents_alive: 80
-  have_shelter: 80
-  have_clothes: 79
+Gini 0.33 · median money 24 · 80/80 alive · farm-dominant with strong fiber sector
+
+Specialisation: farm 45, gather_fiber 26, chop_wood 5, weave 2, tools 1, forage 1  
+Prices: food 1.09, wood 0.73, tools 1.08, fiber 0.92, clothes 1.63  
+Trades: 38,496 · Food/capita: 14.1 · Shelter/Clothes: 80/79
 
 ## Conclusion
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from econ_sim.sim_types import Good, Recipe, SkillDomain
 
@@ -41,6 +41,8 @@ class SimConfig:
         Good.CLOTHES: 40,
         Good.FIBER: 30,
     }
+
+    _reasonable_stock_cache: dict[Good, int] = field(default_factory=dict)
 
     # food consumption should increase without shelter
     shelter_required: bool = True
@@ -122,13 +124,12 @@ class SimConfig:
         return result
 
     def reasonable_stock(self, good: Good) -> int:
-        targets = self.targets()
-        base = targets.get(good, 0)
-        max_input = max((r.inputs.get(good, 0) for r in RECIPES), default=0)
-        if max_input == 0:
-            return base
-        horizon = 10  # ticks of population-wide supply a specialist should be allowed to hold
-        return max(base, max_input * horizon)
+        if good not in self._reasonable_stock_cache:
+            targets = self.targets()
+            base = targets.get(good, 0)
+            max_input = max((r.inputs.get(good, 0) for r in RECIPES), default=0)
+            self._reasonable_stock_cache[good] = max(base, max_input * 10)
+        return self._reasonable_stock_cache[good]
 
 # ARCHETYPE MIX
 ARCHETYPE_MIX: dict[str, float] = {

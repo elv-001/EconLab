@@ -4,3 +4,6 @@ test.md
 /output
 logs/
 *.docx
+profile.out
+__pycache__
+*.lprof

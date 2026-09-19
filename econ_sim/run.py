@@ -7,7 +7,6 @@ from pathlib import Path
 
 from econ_sim.config import DEFAULT_CONFIG, SimConfig
 from econ_sim.metrics import SimReport
-from econ_sim.sim_types import Good
 from econ_sim.simulation import Simulation
 
 
@@ -46,20 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--quiet", action="store_true", help="Only print final summary.")
     return p
-
-def print_progress(sim: Simulation, every: int = 50) -> None:
-    if not sim.snapshots:
-        return
-    snap = sim.snapshots[-1]
-    if snap.tick % every != 0 and snap.tick != sim.config.num_ticks - 1:
-        return
-    last_action = ", ".join(f"{k}={v}" for k, v in sorted(snap.last_action.items()))
-    prices = ", ".join(f"{k}={v:.1f}" for k, v in sorted(snap.prices.items()))
-    alive = snap.agents_alive
-    print(
-        f"tick {snap.tick:4d} | trades={snap.total_trades:3d} | "
-        f"gini={snap.gini:.3f} | {prices} | {last_action} | alive={alive}"
-    )
 
 def print_summary(report: SimReport) -> None:
     summary = report.summary()
@@ -122,20 +107,12 @@ def main(argv: list[str] | None = None) -> int:
         num_ticks=args.ticks,
     )
     sim = Simulation(config=config)
-
+    
     if not args.quiet:
         print(f"Running econ-sim: {config.num_agents} agents, {config.num_ticks} ticks, seed={config.seed}")
         print("-" * 72)
 
-    for _ in range(config.num_ticks):
-        sim.step()
-        if not args.quiet:
-            print_progress(sim)
-
-    e = sum(1 for agent in sim.agents if agent.state.has_shelter)
-    print(f"Has shelter: {e}")
-    f = sum(1 for agent in sim.agents if agent.state.inventory_of(Good.CLOTHES) > 0)
-    print(f"Has Clothes: {f}")
+    sim.run(config.num_ticks, args.quiet)
 
     # Single report construction – carries live agents/prices for archetype stats
     report = SimReport(

@@ -57,6 +57,9 @@ class Agent:
         self.state.current_production_action = Action(ActionType.HOLD)
         self.state.current_trade_actions = []
 
+        self._productivity_factor_cache: dict[SkillDomain, tuple[float, float]] = {}
+        self._productivity_values: dict[str, float] = {}
+
         self._congestion: dict[str, float] = {}
 
         self.expected_sell_rate: dict[Good, float] = {
@@ -87,20 +90,29 @@ class Agent:
     # ------------------------------------------------------------------
     def plan(self, tick: int, market_prices: dict[Good, float], congestion=None) -> None:
         self._congestion = congestion or {}
-        shadow = self.compute_shadow_values(market_prices)
+        self._clothing_shortages = self._shortage(Good.CLOTHES)
+        self._productivity_values = {
+                    recipe.name: self._productivity(recipe)
+                    for recipe in RECIPES
+                }
+        self._shadow_values = self.compute_shadow_values(market_prices)
+        
+
+        recent = list(self.state.recent_recipes)[-5:]
+        self._domain_streak = Counter(RECIPE_BY_NAME[r].domain for r in recent) if recent else Counter()
 
         # 1. Generate all feasible actions
         actions = self._generate_actions(market_prices, tick)
 
         # 2. Score them
-        scored = [(a, self._value_action(a, tick, market_prices, shadow)) for a in actions]
+        scored = [(a, self._value_action(a, tick, market_prices, self._shadow_values)) for a in actions]
         if self.state.skills.get(SkillDomain.WEAVING, 0) >= 1.2:
             vals = []
 
             for r in RECIPES:
                 if self._can_attempt(r, market_prices):
                     v = self._value_produce(
-                        r, tick, market_prices, self.compute_shadow_values(market_prices)
+                        r, tick, market_prices, self._shadow_values
                     )
                     vals.append((r.name, v))
 
@@ -216,10 +228,11 @@ class Agent:
             return self._value_buy(action.good, action.quantity, tick, market_prices, shadow)
 
         if action.action_type == ActionType.SELL and action.good:
-            return self._value_sell(action.good, action.quantity, tick, market_prices, shadow)
+            return self._value_sell(action.good, action.quantity, tick, market_prices)
 
         return -math.inf
 
+    #@profile
     def _value_produce(
         self,
         recipe: Recipe,
@@ -227,7 +240,7 @@ class Agent:
         market_prices: dict[Good, float],
         shadow: dict[Good, float],
     ) -> float:
-        prod = self._productivity(recipe)
+        prod = self._productivity_values[recipe.name]
 
         # Output value
         out_val = 0.0
@@ -245,12 +258,14 @@ class Agent:
 
         # Input cost (owned + to-be-bought)
         in_cost = 0.0
+        any_missing = False
         for good, qty in recipe.inputs.items():
-            have = self.state.inventory_of(good)
+            have = self.state.inventory_of(good) if good != Good.TOOLS else self._get_tool_uses_left()
             owned = min(have, qty)
             missing = qty - owned
             in_cost += self._sell_price(good, market_prices) * owned    # opportunity cost of using owned
             if missing > 0:
+                any_missing = True
                 in_cost += self._buy_price(good, market_prices) * missing   # cash cost of buying
 
         net = out_val - in_cost
@@ -259,26 +274,22 @@ class Agent:
         net *= (0.6 + 0.8 * self.archetype.profit_motivation)
 
         # Mild self-reliance penalty if the recipe required buying
-        if any(self._missing(g, q) > 0 for g, q in recipe.inputs.items()):
+        if any_missing:
             net *= (1.0 - 0.15 * self.state.self_reliance)
 
         if Good.FOOD not in recipe.outputs:
             net -= self._survival_penalty(tick)
 
         for good in recipe.outputs:
-            rate = self.expected_sell_rate.get(good, 1.0)
+            rate = self.expected_sell_rate.get(good, 0.0)
             if rate < 0.7:
                 net *= (0.6 + 0.4 * rate)   # scales down when the agent cannot sell
 
-        # in _value_produce, after computing net:
-        recent = list(self.state.recent_recipes)[-5:]
-        if recent:
-            current_domain_streak = Counter(RECIPE_BY_NAME[r].domain for r in recent)
-            if recipe.domain in current_domain_streak:
-                # small continuity bonus for the domain you've actually been doing —
-                # represents real switching friction (tooling up, momentum, local knowledge)
-                # without telling the agent what to specialize in
-                net *= 1.0 + 0.1 * current_domain_streak[recipe.domain]
+        if recipe.domain in self._domain_streak:
+            # small continuity bonus for the domain you've actually been doing —
+            # represents real switching friction (tooling up, momentum, local knowledge)
+            # without telling the agent what to specialize in
+            net *= 1.0 + 0.1 * self._domain_streak[recipe.domain]
 
         return net
 
@@ -308,13 +319,12 @@ class Agent:
         qty: int,
         tick: int,
         market_prices: dict[Good, float],
-        shadow: dict[Good, float],
     ) -> float:
         if qty <= 0:
             return -math.inf
 
         price = self._sell_price(good, market_prices)
-        expected_proceeds = price * qty * self.expected_sell_rate.get(good, 1.0)
+        expected_proceeds = price * qty * self.expected_sell_rate[good]
 
         # Opportunity cost of selling = what we give up by not holding the good.
         # We use a *conservative* hold value: only the direct need (if any)
@@ -357,15 +367,16 @@ class Agent:
     # ------------------------------------------------------------------
     # Marginal value of goods (need + resale + shadow)
     # ------------------------------------------------------------------
-    def _marginal_value(self, good, qty, tick, market_prices, shadow):
+    def _marginal_value(self, good: Good, qty: int, tick: int, market_prices, shadow):
         if qty <= 0:
             return 0.0
+        price = self._expected_price(good, market_prices)
         need = self._need_value(good, qty, tick)
-        resale = qty * self._expected_price(good, market_prices) * self.expected_sell_rate.get(good, 1.0)
+        resale = qty * price * self.expected_sell_rate.get(good, 0.0)
 
-        base = self.config.base_prices().get(good, 1.0)
-        price_ratio = min(1.0, self._expected_price(good, market_prices) / base)
-        shad = qty * shadow.get(good, self._expected_price(good, market_prices))
+        base = self.config.base_prices()[good]
+        price_ratio = min(1.0, price / base)
+        shad = qty * shadow.get(good, price)
 
         if price_ratio < 0.6:
             discount = 0.55 + 0.45 * (price_ratio / 0.6)
@@ -408,7 +419,7 @@ class Agent:
     def _expected_price(self, good: Good, market_prices: dict[Good, float] | None) -> float:
         if market_prices and good in market_prices:
             return market_prices[good]
-        return self.config.base_prices().get(good, 1.0)
+        return self.config.base_prices()[good]
 
     def _buy_price(self, good, market_prices):
         base = self._expected_price(good, market_prices)
@@ -420,7 +431,7 @@ class Agent:
                 urgency = 0.6
         return max(0.05, base * (1.0 + urgency))
 
-    def _sell_price(self, good, market_prices):
+    def _sell_price(self, good: Good, market_prices: dict[Good, float]):
         base = self._expected_price(good, market_prices)
         surplus = self._surplus(good)
         reasonable = max(1, self.config.reasonable_stock(good))
@@ -472,6 +483,7 @@ class Agent:
     # ------------------------------------------------------------------
     # Shadow values (multi-hop)
     # ------------------------------------------------------------------
+    #@profile
     def compute_shadow_values(
         self,
         market_prices: dict[Good, float] | None = None,
@@ -484,7 +496,7 @@ class Agent:
         for _ in range(iterations):
             updated = dict(values)
             for recipe in RECIPES:
-                prod = self._productivity(recipe)
+                prod = self._productivity_values[recipe.name]
                 if prod <= 0:
                     continue
                 out_val = sum(
@@ -574,13 +586,12 @@ class Agent:
 
         recipe = action.recipe
         if not self.can_afford_recipe(recipe):
-            shadow = self.compute_shadow_values(market_prices)
             candidates = [
                 r for r in RECIPES
                 if self.can_afford_recipe(r)
             ]
             if candidates:
-                recipe = max(candidates, key=lambda r: self._value_produce(r, tick, market_prices, shadow))
+                recipe = max(candidates, key=lambda r: self._value_produce(r, tick, market_prices, self._shadow_values))
             else:
                 return None
 
@@ -618,7 +629,10 @@ class Agent:
 
         self.state.last_recipe = recipe.name
         self.state.recipe_counts[recipe.name] = self.state.recipe_counts.get(recipe.name, 0) + 1
+
         self._apply_learning(recipe)
+        self._productivity_factor_cache.clear()
+
         self.state.recent_recipes.append(recipe.name)
         return outputs
 
@@ -764,18 +778,18 @@ class Agent:
             excess = max(0.0, share - sustainable)
             raw = 1.0 / (1.0 + self.config.gathering_congestion_k * excess)
             return max(self.config.gathering_productivity_floor, raw)
-        
-        skill = self.state.skills.get(recipe.domain, 1.0)
-        affinity = self.skill_affinities.get(recipe.domain, 1.0)
-        skill_f = 1.0 + self.config.skill_effect * (skill - 1.0)
-        aff_f = 1.0 + self.config.affinity_effect * (affinity - 1.0)
+
+        skill_f, aff_f = self._get_skill_affinity_factors(recipe.domain)
         raw = skill_f * aff_f
+
+        skill = self.state.skills.get(recipe.domain, 1.0)
+
         if skill < recipe.min_skill:
             raw *= (skill / recipe.min_skill) ** self.archetype.novice_penalty_exponent
         loss = 0.0
         if self.config.shelter_required and not self.state.has_shelter and recipe.name != "shelter":
             loss += self.config.shelter_productivity_loss
-        if self.config.clothing_enabled and self._shortage(Good.CLOTHES) > 0:
+        if self.config.clothing_enabled and self._clothing_shortages > 0:
             loss += self.config.comfort_productivity_loss
         return min(self.config.skill_productivity_cap, max(0.1, raw * (1.0 - loss)))
 
@@ -783,7 +797,7 @@ class Agent:
         if recipe.domain == SkillDomain.GATHERING:
             return
         current = self.state.skills.get(recipe.domain, 1.0)
-        talent = self.skill_affinities.get(recipe.domain, 1.0)
+        talent = self.skill_affinities[recipe.domain]
         cap = 1.0 + (self.config.skill_productivity_cap - 1.0) * (talent ** 1.5)
         progress = max(0.0, (current - 1.0) / (cap - 1.0))
         gain = self.config.skill_gain_per_use * (1.0 - progress) ** 2 * (talent ** 1.5)
@@ -797,6 +811,17 @@ class Agent:
             last = self._last_used(domain)
             if last > self.config.skill_decay_grace_period:
                 self.state.skills[domain] = max(floor, skill - self.config.skill_decay_per_tick)
+
+    def _get_skill_affinity_factors(self, domain: SkillDomain) -> tuple[float, float]:
+        cached = self._productivity_factor_cache.get(domain)
+        if cached is not None:
+            return cached
+        skill = self.state.skills.get(domain, 1.0)
+        affinity = self.skill_affinities.get(domain, 1.0)
+        skill_f = 1.0 + self.config.skill_effect * (skill - 1.0)
+        aff_f = 1.0 + self.config.affinity_effect * (affinity - 1.0)
+        self._productivity_factor_cache[domain] = (skill_f, aff_f)
+        return skill_f, aff_f
 
     def _last_used(self, domain: SkillDomain) -> int:
         for i, name in enumerate(reversed(self.state.recent_recipes)):
@@ -820,7 +845,7 @@ class Agent:
         if offered <= 0:
             return
         realized = max(0.0, min(1.0, sold / offered))
-        old = self.expected_sell_rate.get(good, 1.0)
+        old = self.expected_sell_rate[good]
         alpha = self.config.price_ema_alpha
         self.expected_sell_rate[good] = max(0.4, (1 - alpha) * old + alpha * realized)
 

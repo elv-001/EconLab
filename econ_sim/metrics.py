@@ -158,6 +158,8 @@ class SimReport:
         }
 
         if include_archetypes and self._agents is not None and self._prices is not None:
+            result["have_shelter"] = sum(1 for agent in self._agents if agent.state.has_shelter)
+            result["have_clothes"] = sum(1 for agent in self._agents if agent.state.inventory_of(Good.CLOTHES) > 0)
             result["wealth_distribution"] = self.wealth_distribution()
             result["wealth_by_archetype"] = self.wealth_by_archetype()
             result["roles_by_archetype"] = self.role_by_archetype()

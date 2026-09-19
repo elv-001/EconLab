@@ -244,7 +244,7 @@ def run_batch(
             for recipe_name, field_name, value in recipe_overrides:
                 stack.enter_context(_recipe_field_override(recipe_name, field_name, value))
             sim = Simulation(config=config)
-            sim.run(ticks)
+            sim.run(ticks, True)
             m = extract_metrics(sim)
 
         all_metrics.append(m)

@@ -52,13 +52,29 @@ class Simulation:
         self._last_congestion = {}
         self._congestion_ema = {}
 
-    def run(self, num_ticks: int | None = None) -> SimReport:
+    def run(self, num_ticks: int | None = None, quiet: bool = False) -> SimReport:
         ticks = num_ticks if num_ticks is not None else self.config.num_ticks
         for _ in range(ticks):
             self.step()
+            if not quiet:
+                self.print_progress()
         return SimReport(
             snapshots=list(self.snapshots),
             final_agents=[a.snapshot() for a in self.agents],
+        )
+
+    def print_progress(self, every: int = 50) -> None:
+        if not self.snapshots:
+            return
+        snap = self.snapshots[-1]
+        if snap.tick % every != 0 and snap.tick != self.config.num_ticks - 1:
+            return
+        last_action = ", ".join(f"{k}={v}" for k, v in sorted(snap.last_action.items()))
+        prices = ", ".join(f"{k}={v:.1f}" for k, v in sorted(snap.prices.items()))
+        alive = snap.agents_alive
+        print(
+            f"tick {snap.tick:4d} | trades={snap.total_trades:3d} | "
+            f"gini={snap.gini:.3f} | {prices} | {last_action} | alive={alive}"
         )
 
     def step(self) -> TickSnapshot:

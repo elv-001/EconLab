@@ -19,6 +19,8 @@ Trades: 38,496 · Food/capita: 14.1 · Shelter/Clothes: 80/79
 
 ### 1. Trade vs Autarky
 
+Does enabling trade increase total economic output? 
+
 **Conditions:**
 - A: Trades enabled (baseline)
 - B: Trades disabled
@@ -48,7 +50,7 @@ Trade strongly reduces foraging, enabling large-scale food and fiber production 
 
 ### 2. Starting Inequality
 
-I want to see if an equal starting point reduces inequality, and what other side effects there are.
+How does the starting point of agents (determined by jitter) impact equality and the economy? 
 
 **Conditions:**
 - A: Zero Jitter
@@ -74,7 +76,7 @@ Zero jitter significantly raised mortality and inequality. That contradicts what
 
 ### 3. Skill Effect
 
-Now, I want to investigate whether a higher skill multiplier causes greater comparative advantage and helps sustain secondary specialisations.
+Does varying the skill multiplier significantly impact specialisation distributions?
 
 **Conditions:**
 - A: Low (0.6)
@@ -100,7 +102,7 @@ Minor effects. Low skill effect means affinity matters more, so initial variatio
 
 ### 4. Farming Productivity
 
-Currently, farming dominates the primary activity of agents. How will changing the productivity of farming impact its economy?
+Does varying the farming output cause changes in secondary specialisations?
 
 **Conditions:**
 - A: Low (4 food)
@@ -129,12 +131,44 @@ Currently, farming dominates the primary activity of agents. How will changing t
 
 Farming, as the dominant strategy, acts as a survival mechanism. If its output is low, the death rate increases significantly. Interestingly enough, a high farm output causes the number of farmers to drop and the number of fiber gatherers to increase, as agents shift their focus to clothing, which becomes a scarcer resource.
 
-## Conclusion
+### 5. Trade Quantity Limits
+
+Does removing the trade quantity constraint increase inequality?
+
+**Conditions:**
+- A: Baseline (max trades per tick is 2 per agent)
+- B: Unlimited (max trades per tick is 100000 per agent)
+
+<br>
+
+**Results:**
+
+| Metric                  | Baseline  | Unlimited| 
+|-------------------------|-----------|----------|
+| Gini                    | 0.31      | 0.72     |
+| Median money            | 29.1      | 3.4      |
+| Food per capita         | 12.9      | 12.9     |
+| Farm share              | 47%       | 39%      |
+| Fiber share             | 36%       | 20%      |
+| Weave + Tools share     | ~3%       | 10%      |
+| Total clothes           | 455       | 251      |
+| Weaving skill (median)  | 1.20      | 1.04     |
+
+**Conclusion:**
+
+This confirms my hypothesis that unlimited trades causes extremely unequal wealth distribution. Removing this constraint means agents are able to determine however they allocate all of their resources. 
+
+Looking at the wealth distribution (seed 2, 500 ticks, 80 agents), the top 10% holds 62% of all wealth, whereas the bottom 50% hold 7.8%. That's a huge diffence to the baseline run, where the top 10% only holds 25.8% of all wealth.
+
+I suspect that removing this constraint amplifies any existing differences in agent behaviour, allowing them to benefit/lose more based on market opportunities. The trade quantity constraint acts as a key equalising mechanism.
+
+## Summary
 
 This model shows:
 - Specialization and a division of labour occur once trade is allowed
 - Trade raises living standards (in terms of goods) whilst increasing inequality
 - Farming productivity is the key constraint that impacts the entire economy
+- Trade quantity limits acts as a key equalising mechanism
 
 However, it is still relatively weak in areas like:
 - Comparative advantage (adjusting skill effect shows little to no impact)

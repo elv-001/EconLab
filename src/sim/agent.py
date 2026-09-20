@@ -4,14 +4,14 @@ import math
 import random
 from collections import Counter, deque
 
-from econ_sim.config import (
+from sim.config import (
     ARCHETYPE_MIX,
     RECIPE_BY_NAME,
     RECIPES,
     TRADEABLE_GOODS,
     SimConfig,
 )
-from econ_sim.sim_types import (
+from sim.sim_types import (
     ARCHETYPES,
     Action,
     ActionType,

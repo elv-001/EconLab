@@ -5,9 +5,9 @@ import json
 import sys
 from pathlib import Path
 
-from econ_sim.config import DEFAULT_CONFIG, SimConfig
-from econ_sim.metrics import SimReport
-from econ_sim.simulation import Simulation
+from sim.config import DEFAULT_CONFIG, SimConfig
+from sim.metrics import SimReport
+from sim.simulation import Simulation
 
 
 def run_once(config: SimConfig, quiet: bool = True) -> dict:

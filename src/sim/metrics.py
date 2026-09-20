@@ -5,10 +5,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from econ_sim.agent import Agent
-from econ_sim.config import TRADEABLE_GOODS, SimConfig
-from econ_sim.sim_types import Good, TradeRecord
-from econ_sim.wealth_distribution import wealth_distribution_report
+from sim.agent import Agent
+from sim.config import TRADEABLE_GOODS, SimConfig
+from sim.sim_types import Good, TradeRecord
+from sim.wealth_distribution import wealth_distribution_report
 
 
 @dataclass

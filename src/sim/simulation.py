@@ -5,12 +5,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from econ_sim.agent import Agent, create_agents
-from econ_sim.config import SimConfig
-from econ_sim.events import EventLog, EventType
-from econ_sim.market import Market
-from econ_sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
-from econ_sim.sim_types import ActionType, Good, Order, SkillDomain, TradeRecord
+from sim.agent import Agent, create_agents
+from sim.config import SimConfig
+from sim.events import EventLog, EventType
+from sim.market import Market
+from sim.metrics import SimReport, TickSnapshot, compute_tick_snapshot
+from sim.sim_types import ActionType, Good, Order, SkillDomain, TradeRecord
 
 
 @dataclass

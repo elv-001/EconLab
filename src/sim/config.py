@@ -3,7 +3,7 @@ from __future__ import annotations
 import typing
 from dataclasses import dataclass, field
 
-from econ_sim.sim_types import Good, Recipe, SkillDomain
+from sim.sim_types import Good, Recipe, SkillDomain
 
 
 @dataclass
@@ -13,6 +13,8 @@ class SimConfig:
     seed: int = 42
     num_agents: int = 80
     num_ticks: int = 400
+
+    max_trades_per_tick: int = 2
 
     # Starting endowments
     initial_money: float = 40.0

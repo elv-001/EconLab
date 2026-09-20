@@ -29,9 +29,9 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields
 from typing import Any
 
-from econ_sim.config import RECIPE_BY_NAME, SimConfig
-from econ_sim.sim_types import Good, SkillDomain
-from econ_sim.simulation import Simulation
+from sim.config import RECIPE_BY_NAME, SimConfig
+from sim.sim_types import Good, SkillDomain
+from sim.simulation import Simulation
 
 
 @contextmanager

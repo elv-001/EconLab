@@ -4,7 +4,7 @@ Agent-based economic simulator where specialisation, trade, inequality, and pric
 
 **Key Findings:**
 
-- Enabling trade cut the number of agnts foraging (a basic survival mechanism) from 64% to 2%, raising food per capita from 8 to 13
+- Enabling trade cut the number of agents foraging (a basic survival mechanism) from 64% to 2%, raising food per capita from 8 to 13
 - Specialisations emerge: 56% of the population are farmers, 32.5% are fiber gatherers, 6% are lumberjacks, with the rest being carpenters or foragers (using the seed & ticks in quick start)
 - High volume of trades (38,496), meaning agents exchange goods to aid in their production or gain money to purchase goods
 - Interesting wealth distribution: top 10% controls 27.9% of wealth, bottom 50% control 28.1%
@@ -14,7 +14,11 @@ Agent-based economic simulator where specialisation, trade, inequality, and pric
 
 ```bash
 pip install -e
-sim
+```
+
+Then run
+```
+sim --agents 80 --ticks 500
 ```
 
 Run an eval:
